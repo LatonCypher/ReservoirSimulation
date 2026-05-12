@@ -1,3 +1,5 @@
 <Solution>
+  <Project Path="../sepalsolver/SepalSolver.PlotLib/SepalSolver.PlotLib.csproj" />
+  <Project Path="../sepalsolver/SepalSolver/SepalSolver.csproj" />
   <Project Path="ResSim/ResSim.csproj" />
 </Solution>
