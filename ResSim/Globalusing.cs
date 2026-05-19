@@ -1,4 +1,5 @@
-﻿global using System.Linq;
+﻿global using MKLNET;
+global using System.Linq;
 global using SepalSolver;
 global using System.Data;
 global using System.Net.Http;
