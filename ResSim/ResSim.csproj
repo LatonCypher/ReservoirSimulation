@@ -5,16 +5,16 @@
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="MKL.NET" Version="1.6.0" />
-    <PackageReference Include="MKL.NET.win-x64" Version="2022.0.0.115" />
+    <PackageReference Include="SepalSolver" Version="1.1.8.3" />
+    <PackageReference Include="SepalSolver.PlotLib" Version="1.1.8.3" />
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\sepalsolver\SepalSolver.PlotLib\SepalSolver.PlotLib.csproj" />
-    <ProjectReference Include="..\..\sepalsolver\SepalSolver\SepalSolver.csproj" />
+    <ProjectReference Include="..\ReservoirSimulator\ReservoirSimulator.csproj" />
   </ItemGroup>
 
 </Project>

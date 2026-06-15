@@ -1,4 +1,5 @@
 ﻿global using MKLNET;
+global using ReservoirSimulator;
 global using System.Linq;
 global using SepalSolver;
 global using System.Data;

@@ -1,5 +1,4 @@
 <Solution>
-  <Project Path="../sepalsolver/SepalSolver.PlotLib/SepalSolver.PlotLib.csproj" />
-  <Project Path="../sepalsolver/SepalSolver/SepalSolver.csproj" />
+  <Project Path="ReservoirSimulator/ReservoirSimulator.csproj" Id="2bb7aca7-24bd-4f8a-b854-f67a1a4596b8" />
   <Project Path="ResSim/ResSim.csproj" />
 </Solution>
