@@ -1,122 +1,125 @@
 ﻿
+using HarfBuzzSharp;
+
 {
-    // 1. Grid Specifications (10x10x3)
-    int nx = 50, ny = 1, nz = 1;
-    int ngrids = nx * ny * nz;
+    //// 1. Grid Specifications (10x10x3)
+    //int nx = 50, ny = 1, nz = 1;
+    //int ngrids = nx * ny * nz;
 
-    double[] dx = Repmat(10, ngrids);
-    double[] dy = Repmat(10, ngrids);
-    double[] dz = Repmat(20, ngrids);
-    double[] z = [..Enumerable.Range(0, ngrids).
-                    Select(i=>10 + i/(nx*ny)*20)];          
-    double[] perm = Repmat(500, ngrids);                   // 100 mD
-    double[] phi = Repmat(0.20, ngrids);                   // 20% porosity
+    //double[] dx = Repmat(10, ngrids);
+    //double[] dy = Repmat(10, ngrids);
+    //double[] dz = Repmat(20, ngrids);
+    //double[] z = [..Enumerable.Range(0, ngrids).
+    //                Select(i=>10 + i/(nx*ny)*20)];          
+    //double[] perm = Repmat(500, ngrids);                   // 100 mD
+    //double[] phi = Repmat(0.20, ngrids);                   // 20% porosity
 
-    // 2. Instantiate Wells
-    List<Well> wells =
-    [
-        // Injector at Block 0
-        new Well(WellType.Producer, "WP3051X", 0.5, 0, 1500, 6000, 4, 0, [0,0], [0], [100]),
-        // Producer at Block 9
-        new Well(WellType.Injector, "WP5032X", 0.5, 0, 1500, 6000, 0, 0, [0,0], [0], [100])
-    ];
+    //// 2. Instantiate Wells
+    //List<Well> wells =
+    //[
+    //    // Injector at Block 0
+    //    new Well(WellType.Producer, "WP3051X", 0.5, 0, 1500, 6000, 49, 0, [0,0], [0], [100]),
+    //    // Producer at Block 9
+    //    new Well(WellType.Injector, "WP5032X", 0.5, 0, 1500, 6000, 0, 0, [0,0], [0], [100])
+    //];
 
-    // 3. Physical Parameters mapped precisely to your signature
-    double peow = 0;         // Disabled capillary entry pressure for the baseline check
-    double pw_woc = 2000.0;  // Reference pressure at Water-Oil Contact
-    double z_woc = 25.0;    // Water-Oil Contact
-    double mult_z = 1.0;     // Vertical permeability multiplier anisotropy
-    double sw_r = 0.2;       // Residual water saturation
-    double so_r = 0.2;       // Residual oil saturation
-    double bo0 = 1.1;        // Initial Oil FVF (Formation Volume Factor)
-    double bw0 = 1.038;      // Initial Water FVF
-    double muo0 = 2.0;       // Oil Viscosity (2.0 cP)
-    double muw0 = 0.118;     // Water Viscosity (1.0 cP)
-    double gamo0 = 0.356;    // Oil gravity gradient (psi/ft)
-    double gamw0 = 0.433;    // Water gravity gradient (psi/ft)
-    double krw0 = 0.4;       // Max water relative permeability endpoint
-    double kro0 = 0.8;       // Max oil relative permeability endpoint
+    //// 3. Physical Parameters mapped precisely to your signature
+    //double peow = 0;         // Disabled capillary entry pressure for the baseline check
+    //double pw_woc = 2000.0;  // Reference pressure at Water-Oil Contact
+    //double z_woc = 25.0;    // Water-Oil Contact
+    //double mult_z = 1.0;     // Vertical permeability multiplier anisotropy
+    //double sw_r = 0.2;       // Residual water saturation
+    //double so_r = 0.2;       // Residual oil saturation
+    //double bo0 = 1.1;        // Initial Oil FVF (Formation Volume Factor)
+    //double bw0 = 1.038;      // Initial Water FVF
+    //double muo0 = 2.0;       // Oil Viscosity (2.0 cP)
+    //double muw0 = 0.118;     // Water Viscosity (1.0 cP)
+    //double gamo0 = 0.356;    // Oil gravity gradient (psi/ft)
+    //double gamw0 = 0.433;    // Water gravity gradient (psi/ft)
+    //double krw0 = 0.4;       // Max water relative permeability endpoint
+    //double kro0 = 0.8;       // Max oil relative permeability endpoint
 
-    // Setting compressibilities to zero isolates purely incompressible flow dynamics
-    double co = 8e-6;
-    double cw = 6e-6;
-    double cr = 4e-6;
+    //// Setting compressibilities to zero isolates purely incompressible flow dynamics
+    //double co = 8e-6;
+    //double cw = 6e-6;
+    //double cr = 4e-6;
 
-    double bo = 3e-7;        // Viscosity exponential factors (Oil)
-    double bw = 0.0;         // Viscosity exponential factors (Water)
-    double nw = 1.0;         // Corey relative permeability exponent (Water)
-    double no = 1.0;         // Corey relative permeability exponent (Oil)
-    double pb = 1500.0;      // Bubble point pressure
-    double pref = 6000;      // Reference system pressure
+    //double bo = 3e-7;        // Viscosity exponential factors (Oil)
+    //double bw = 0.0;         // Viscosity exponential factors (Water)
+    //double nw = 1.0;         // Corey relative permeability exponent (Water)
+    //double no = 1.0;         // Corey relative permeability exponent (Oil)
+    //double pb = 1500.0;      // Bubble point pressure
+    //double pref = 6000;      // Reference system pressure
 
 
-    // 4. Run for 30 days broken into intervals
-    double[] resultTime = Linspace(0, 2000, 2);
+    //// 4. Run for 30 days broken into intervals
+    //double[] resultTime = Linspace(0, 2000, 2);
 
-    // 5. Initialization via exact signature mapping
-    var reservoir1 = new OilWaterReservoir(
-        nx, ny, nz, perm, phi, dx, dy, dz, z, peow, pw_woc,
-        z_woc, mult_z, sw_r, so_r, bo0, bw0, muo0, muw0, gamo0, gamw0,
-        krw0, kro0, co, cw, cr, bo, bw, nw, no, pb, pref, wells
-    );
-    reservoir1.Initialize();
-    tic();
-    Console.WriteLine("Executing Core Simulation Test Loop...");
-    reservoir1.Simulate2Phase(resultTime, wells);
-    Console.WriteLine($"Simulation completed successfully without crashing in {toc():F2} seconds!");
-    reservoir1.ExportParaView("C:\\Users\\lateef.a.kareem\\Documents\\GitHub\\ReservoirSimulation\\RunTest1");
+    //// 5. Initialization via exact signature mapping
+    //var reservoir1 = new OilWaterReservoir(
+    //    nx, ny, nz, perm, phi, dx, dy, dz, z, peow, pw_woc,
+    //    z_woc, mult_z, sw_r, so_r, bo0, bw0, muo0, muw0, gamo0, gamw0,
+    //    krw0, kro0, co, cw, cr, bo, bw, nw, no, pb, pref, wells
+    //);
+    //reservoir1.Initialize();
+    //tic();
+    //Console.WriteLine("Executing Core Simulation Test Loop...");
+    //reservoir1.Simulate2Phase(resultTime, wells);
+    //Console.WriteLine($"Simulation completed successfully without crashing in {toc():F2} seconds!");
+    //reservoir1.ExportParaView("C:\\Users\\lateef.a.kareem\\Documents\\GitHub\\ReservoirSimulation\\RunTest1");
 
-    // 5. Initialization via exact signature mapping
-    var reservoir2 = new OilWaterReservoirNoGC(
-        nx, ny, nz, perm, phi, dx, dy, dz, z, peow, pw_woc,
-        z_woc, mult_z, sw_r, so_r, bo0, bw0, muo0, muw0, gamo0, gamw0,
-        krw0, kro0, co, cw, cr, bo, bw, nw, no, pb, pref, wells
-    );
-    reservoir2.Initialize();
-    tic();
-    Console.WriteLine("Executing Core Simulation Test Loop...");
-    reservoir2.Simulate2Phase(resultTime, wells);
-    Console.WriteLine($"Simulation completed successfully without crashing in {toc():F2} seconds!");
-    reservoir2.ExportParaView("C:\\Users\\lateef.a.kareem\\Documents\\GitHub\\ReservoirSimulation\\RunTest2");
+    //// 5. Initialization via exact signature mapping
+    //var reservoir2 = new OilWaterReservoirNoGC(
+    //    nx, ny, nz, perm, phi, dx, dy, dz, z, peow, pw_woc,
+    //    z_woc, mult_z, sw_r, so_r, bo0, bw0, muo0, muw0, gamo0, gamw0,
+    //    krw0, kro0, co, cw, cr, bo, bw, nw, no, pb, pref, wells
+    //);
+    //reservoir2.Initialize();
+    //tic();
+    //Console.WriteLine("Executing Core Simulation Test Loop...");
+    //reservoir2.Simulate2Phase(resultTime, wells);
+    //Console.WriteLine($"Simulation completed successfully without crashing in {toc():F2} seconds!");
+    //reservoir2.ExportParaView("C:\\Users\\lateef.a.kareem\\Documents\\GitHub\\ReservoirSimulation\\RunTest2");
 
    
-    Console.WriteLine($"Number of function calls = {reservoir1.funcall:F0}!");
-    Console.WriteLine($"Number of function calls = {reservoir2.funcall:F0}!");
+    //Console.WriteLine($"Number of function calls = {reservoir1.funcall:F0}!");
+    //Console.WriteLine($"Number of function calls = {reservoir2.funcall:F0}!");
 }
 
 {   // Eclipse Style Input
 
     // DIMENS
-    int nx = 100, ny = 1, nz = 20;
+    int nx = 20, ny = 20, nz = 5;
 
     // GRID
-    double[] dx = Repmat(25, 2000), dy = Repmat(25, 2000), 
-        dz = Repmat(2.5, 2000), zTop = Repmat(0, 100);
-    double[] phi = Repmat(0.2, 2000), perm = Repmat(100, 2000);
+    double[] dx = Repmat(250, nx*ny*nz), dy = Repmat(250, nx*ny*nz), 
+        dz = Repmat(30, nx*ny*nz), zTop = Repmat(0, nx*ny);
+    double[] phi = Repmat(0.2, nx * ny * nz), 
+        perm = Repmat(600, nx * ny * nz);
     double mult_z = 0.2;
 
     // PVTW
-    double pref_w = 6000, bw0 = 1, cw = 1e-8, μw0 = 0.3, bw = 1e-10;
+    double pref_w = 6000, bw0 = 1, cw = 2e-7, μw0 = 0.3, bw = 1e-10;
 
     // PVDO (Pressure, FVF, Muo) 
     Matrix pvdo = new double[,]
     {
-        { 14,       1.000001,   0.999999 },
-        { 100,      1.000000,   1.000000 },
-        { 1000,     0.999999,   1.000001 },
-        { 2000,     0.999998,   1.000002 },
-        { 3000,     0.999997,   1.000003 },
-        { 4000,     0.999996,   1.000004 },
-        { 5000,     0.999995,   1.000005 },
-        { 6000,     0.999994,   1.000006 },
-        { 7000,     0.999993,   1.000007 },
-        { 8000,     0.999992,   1.000008 },
-        { 9000,     0.999991,   1.000009 },
-        { 10000,    0.999990,   1.000010 }
+        { 14,       1.001,   0.999999 },
+        { 100,      1.000,   1.000000 },
+        { 1000,     0.999,   1.000001 },
+        { 2000,     0.998,   1.000002 },
+        { 3000,     0.997,   1.000003 },
+        { 4000,     0.996,   1.000004 },
+        { 5000,     0.995,   1.000005 },
+        { 6000,     0.994,   1.000006 },
+        { 7000,     0.993,   1.000007 },
+        { 8000,     0.992,   1.000008 },
+        { 9000,     0.991,   1.000009 },
+        { 10000,    0.990,   1.000010 }
     };
 
     // ROCK
-    double pref_r = 6000, cr = 1e-6;
+    double pref_r = 6000, cr = 5e-6;
 
     // SWOF (Sw, Krw, Kro, Pcwo)
     Matrix swof = new double[,]
@@ -140,18 +143,21 @@
     double ρo0 = 43.68, ρw0 = 62.43;
 
     // EQUIL     
-    double datum = 0, pdatun = 100, z_woc = 50, pcwoc = 0;
+    double datum = 0, pdatun = 3000, z_woc = 150, pcwoc = 0;
 
     // WELL
     List<Well> wells =
     [
         // Injector at Block 0
-        new Well(WellType.Producer, "WP3051X", 0.5, 0, 1500, 10000, 49, 0, [0,9], [0, 500], [200, 400]),
+        new Well(WellType.Producer, "WP3051X", 0.5, 0, 1500, 6000, 19, 0, [0,2], [0, 500, 1000], [200, 400, 800]),
         // Producer at Block 9
-        new Well(WellType.Injector, "WP5032X", 0.5, 0, 1500, 10000, 0, 0, [10,19], [0, 500], [200, 400])
+        new Well(WellType.Injector, "WP5032X", 0.5, 0, 1500, 6000, 0, 19, [3,4], [0, 500, 1000], [200, 400, 1000])
     ];
 
-    var reservoir = new OilWaterReservoirNoGC(
+    //--AQUID              I1   I2    J1   J2     K1    K2                   FACE          CNCT_EFF
+    Aquifer Aquifer = new([0, nx-1], [0, ny-1], [nz-1, nz-1], AquiferFlowDirection.Kplus, 3050, 0.5);
+
+    var reservoir = new OilWaterReservoir(
             // DIMENS
             nx, ny, nz,
 
@@ -177,10 +183,13 @@
             datum, pdatun, z_woc, pcwoc,
 
             // WELL
-            wells
+            wells,
+
+            // AQUIFER
+            Aquifer
     );
     reservoir.Initialize();
-    double[] resultTime = Linspace(0, 600, 2);
+    double[] resultTime = Linspace(0, 3300, 2);
 
 
     tic();

@@ -34,4 +34,14 @@
         Y,
         Z
     }
+
+    public enum AquiferFlowDirection
+    {
+        Iplus,
+        Iminus,
+        Jplus,
+        Jminus,
+        Kplus,
+        Kminus
+    }
 }

@@ -37,9 +37,14 @@ internal class ADiff
         Value = source.Value;
         Derivatives.Clear();
         foreach (var kvp in source.Derivatives)
-        {
             Derivatives[kvp.Key] = kvp.Value;
-        }
+        return this;
+    }
+
+    public ADiff CopyFrom(double source)
+    {
+        Value = source;
+        Derivatives.Clear();
         return this;
     }
     public static implicit operator ADiff(double a) => new(a);

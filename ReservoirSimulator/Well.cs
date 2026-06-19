@@ -7,6 +7,7 @@ namespace ReservoirSimulator
         int lastindex = 0, nextindex = 1;
         public string Name { get; }
         public int[] Perforation_NatIndex { get { return perforation_NatIndex; } }
+        public double[] Perforation_WI { get { return productivity_Index; } }
         public double MinPressure { get; }
         public double MaxPressure { get; }
         public double ProdRate(double time)
@@ -45,6 +46,7 @@ namespace ReservoirSimulator
         public (List<double> Time, List<double> Rate) ProductionProfile { get; set; }
 
         int[] perforation_NatIndex;
+        double[] productivity_Index;
 
         public Well(WellType welltype, string name, double radius, double skin, double minPressure, double maxPressure,
             int i, int j, int[] perfInterval, List<double> time, List<double> rate)
@@ -64,6 +66,18 @@ namespace ReservoirSimulator
         {
             var rng = Enumerable.Range(PerfInterval[0], PerfInterval[1] - PerfInterval[0] + 1);
             perforation_NatIndex = [.. rng.Select(k => I + J*Nx + k*Nx*Ny)];
+        }
+
+        internal void ComputeProductivityIndex(double[] Kx, double[] Ky, double[] Dx, double[] Dy, double[] Dz)
+        {
+            productivity_Index = new double[PerfInterval[1] - PerfInterval[0] + 1];
+            int i = 0; double alpha_well = 1.127e-3*2*pi;
+            foreach (int m in perforation_NatIndex)
+            {
+                double re = 0.28*Hypot(Pow(Ky[m]/Kx[m], 0.25)*Dx[m], Pow(Kx[m]/Ky[m], 0.25)*Dy[m])/
+                    (Pow(Ky[m]/Kx[m], 0.25) + Pow(Kx[m]/Ky[m], 0.25));
+                productivity_Index[i++] = alpha_well*Sqrt(Kx[m]*Ky[m])*Dz[m]/(Log(re/Radius) + Skin);
+            }
         }
         internal ADiff Constraint(double time, ADiff Pressure, ADiff Rate )
         {

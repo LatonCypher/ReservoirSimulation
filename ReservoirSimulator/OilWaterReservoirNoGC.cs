@@ -1,4 +1,5 @@
 ﻿using Microsoft.CodeAnalysis.CSharp.Syntax;
+using ScottPlot.Colormaps;
 using SepalSolver;
 using System.Text;
 using static ReservoirSimulator.Math;
@@ -13,7 +14,6 @@ namespace ReservoirSimulator
 
         // Define conversion constants
         const double alpha = 1.127e-3,        // Darcy to Field units factor
-          alpha_well = 1.127e-3*2*pi,         // Darcy to Field units factor for wells
                 beta = 5.615;                 // ft3 to bbl conversion factor
         double Transmissibility(Direction d, int m, int n)
         {
@@ -45,7 +45,6 @@ namespace ReservoirSimulator
             return [.. Y[i-1].Zip(Y[i], (a, b) => betweenab(a, b, f))];
         }
         double Harmmean(double x1, double x2) => 2/(1/x1 + 1/x2);
-     
 
         /// <summary>
         /// Sws = Sw => (Sw - Sw_r)/(1 - Sw_r);
@@ -323,6 +322,49 @@ namespace ReservoirSimulator
         double Krw(double Sw) => 
             Sw <= Sw_r ? 0 : krw0 * Pow(Swe(Sw), nw);
 
+
+        void GuessReset()
+        {
+            int indx = 0;
+            for (int i = 0; i < Ngrids; i++)
+            {
+                xs[indx++].Value = Po_n[i];  // Matches Po index
+                xs[indx++].Value = Sw_n[i];  // Matches Sw index
+            }
+            for (int i = 0; i < Nwells; i++)
+            {
+                xs[indx++].Value = Pwells_n[i]; // Matches Pwf index
+                xs[indx++].Value = Qwells_n[i]; // Matches Q index
+            }
+        }
+
+        (double[] Po, double[] Sw, double[] Pwell, double[] Qwell, double maxDP, double maxDS, int j) ExtractSolution()
+        {
+            int indx = 0, j = 0; double maxDp = 0, maxDs = 0;
+            double[] Po = new double[Ngrids], Sw = new double[Ngrids],
+                Pwell = new double[Nwells], Qwell = new double[Nwells];
+            for (int i = 0; i < Ngrids; i++)
+            {
+                Po[i] = xs[indx++].Value; // Matches Po index
+                Sw[i] = xs[indx++].Value; // Matches Sw index
+                maxDp = Max(maxDp, Abs(Po[i] - Po_n[i]));
+                if (Abs(Sw[i] - Sw_n[i]) > maxDs)
+                { j = i; maxDs = Abs(Sw[i] - Sw_n[i]); }
+            }
+            for (int i = 0; i < Nwells; i++)
+            {
+                Pwell[i] = xs[indx++].Value; // Matches Pwf index
+                Qwell[i] = xs[indx++].Value; // Matches Q index
+            }
+            return (Po, Sw, Pwell, Qwell, maxDp, maxDs, j);
+        }
+
+        double[] LinSolve(List<double> a_value, List<int> a_index, List<int> a_start, List<double> b)
+        {
+            return MklSparseSolver.Solve([.. a_value], [.. a_index], [.. a_start], [.. b]);
+        }
+
+
         readonly int Nx, Ny, Nz, NxNy, Ngrids, Nwells, varNum;
         readonly double[] Kx, Ky, Kz, Φ, Dx, Dy, Dz, Z;
         double[] Po_n, Sw_n, Pw_n, So_n, Qwells_n, Pwells_n, ErSw_Bw_n, ErSo_Bo_n;
@@ -330,7 +372,7 @@ namespace ReservoirSimulator
             Bo0, Bw0, Po_woc, Z_woc, co, cw, cr, bo, bw, nw, no, np,
             μo0, μw0, γo0, γw0, P_datum, Z_datum;
         List<Well> Wells;
-        Matrix SWOF, SGOF, PVTO, PVDO, PVDG;
+        Aquifer Aquifer;
 
         public OilWaterReservoirNoGC(
             // DIMENS
@@ -359,13 +401,16 @@ namespace ReservoirSimulator
             double _datum, double _pdatun, double _z_woc, double _pcwoc,
 
             // WELL
-            List<Well> _wells)
+            List<Well> _wells,
+
+            // AQUIFER
+            Aquifer _aquifer = null )
         {
             ADiff.capacity = 16;
             Nx = _nx; Ny = _ny; Nz = _nz; NxNy = Nx*Ny; Ngrids = Nx*Ny*Nz;
             Dx = _dx; Dy = _dy; Dz = _dz; Kx = _perm; Ky = _perm;
             Kz = [.. _perm.Select(k => k*_mult_z)]; Φ = _phi;
-            Wells = _wells;
+            Wells = _wells; Aquifer = _aquifer;
 
             // Extract the Z
             Z = new double[Ngrids];
@@ -388,6 +433,7 @@ namespace ReservoirSimulator
             var pvdoresult = pvdo.FitPvdoProperties(Pb);
             Bo0 = pvdoresult.BoAtPRef;
             μo0 = pvdoresult.ViscosityAtPRef;
+            γo0 = _ρo0/144;
             co = pvdoresult.ConstantCompressibility;
             bo = pvdoresult.ViscosityExponent;
 
@@ -415,6 +461,7 @@ namespace ReservoirSimulator
                 Po_woc = Pw_woc + Pe;
             }
             Wells = _wells; Nwells = Wells.Count; varNum = 2*Ngrids + 2*Nwells;
+            Aquifer = _aquifer;
         }
         
         public OilWaterReservoirNoGC(int _nx, int _ny, int _nz,
@@ -424,7 +471,7 @@ namespace ReservoirSimulator
             double _bo0, double _bw0, double _μo0, double _μw0, double _γo0,
             double _γw0, double _krw0, double _kro0, double _co, double _cw,
             double _cr, double _bo, double _bw, double _nw, double _no,
-            double _pb, double _pref, List<Well> _wells)
+            double _pb, double _pref, List<Well> _wells, Aquifer _aquifer = null)
         {
             ADiff.capacity = 16;
             Kx = _perm; Ky = _perm; Kz = [.. _perm.Select(k => k*_mult_z)];
@@ -436,6 +483,7 @@ namespace ReservoirSimulator
             np = -1.5; μo0 = _μo0; μw0 = _μw0; γo0 = _γo0; γw0 = _γw0;
             Pw_woc = _pw_woc; Po_woc = Pw_woc + Pe; Z_woc = _z_woc;
             Wells = _wells; Nwells = Wells.Count; varNum = 2*Ngrids + 2*Nwells;
+            Aquifer = _aquifer;
         }
         
         public void Initialize()
@@ -444,18 +492,25 @@ namespace ReservoirSimulator
             // 2. Initialize the spatial grid blocks
             Pw_n = new double[Ngrids]; Sw_n = new double[Ngrids];
             Po_n = new double[Ngrids]; So_n = new double[Ngrids];
-            xs = new ADiff[varNum];   Res = new ADiff[varNum];  
+            ErSo_Bo_n = new double[Ngrids]; ErSw_Bw_n = new double[Ngrids];
             ErSo_Bo_np1 = new ADiff[Ngrids]; ErSw_Bw_np1 = new ADiff[Ngrids];
+            Res = new ADiff[varNum]; xs = new ADiff[varNum];
 
             if (Pe == 0)
             {
                 for (int i = 0; i < Ngrids; i++)
                 {
                     Pw_n[i] = Pw_woc + (Z[i] > Z_woc ? γw(Pw_woc) : γo(Pw_woc)) * (Z[i] - Z_woc);
-                    Po_n[i] = Pw_n[i]; Sw_n[i] = Z[i] > Z_woc ? 1 : Sw_r; So_n[i] = 1.0 - Sw_n[i];
-                    xs[2*i] = new(Po_n[i], 2*i); xs[2*i+1] = new(Sw_n[i], 2*i+1);
-                    ErSo_Bo_np1[i] = new(); ErSw_Bw_np1[i] = new(); 
+                    Po_n[i] = Pw_n[i]; Sw_n[i] = Z[i] > Z_woc ? 1 : Sw_r; 
+                    
+                    So_n[i] = 1.0 - Sw_n[i];
+                    xs[2*i] = new(Po_n[i], 2*i); 
+                    xs[2*i+1] = new(Sw_n[i], 2*i+1);
                     Res[2*i] = new(); Res[2*i+1] = new();
+                    double meanP = So_n[i]*Po_n[i] + Sw_n[i]*Pw_n[i];
+                    ErSo_Bo_n[i] = Er(meanP) * So_n[i] / Bo(Po_n[i]);
+                    ErSw_Bw_n[i] = Er(meanP) * Sw_n[i] / Bw(Pw_n[i]);
+                    ErSo_Bo_np1[i] = new(); ErSw_Bw_np1[i] = new();
                 }
             }
             else
@@ -464,11 +519,6 @@ namespace ReservoirSimulator
                 List<double> Sw_Table = [.. Linspace(1.0-So_r-1e-5, Sw_r+1e-5, 50)];
                 // Calculate Pc for each Sw point in our table
                 List<double> Pc_Table = [.. Sw_Table.Select(Pc_D)];
-
-                // Initialize the ADiff scratchpad arrays for the next time step
-                ErSo_Bo_np1 = new ADiff[Ngrids]; ErSw_Bw_np1 = new ADiff[Ngrids];
-
-                Res = new ADiff[varNum]; xs = new ADiff[varNum];
 
                 for (int i = 0; i < Ngrids; i++)
                 {
@@ -488,17 +538,22 @@ namespace ReservoirSimulator
                         Sw_n[i] = 1.0;
 
                     So_n[i] = 1.0 - Sw_n[i];
-                    xs[2*i] = new(Po_n[i], 2*i); xs[2*i+1] = new(Sw_n[i], 2*i+1);
+                    xs[2*i] = new(Po_n[i], 2*i); 
+                    xs[2*i+1] = new(Sw_n[i], 2*i+1);
                     Res[2*i] = new(); Res[2*i+1] = new();
+                    double meanP = So_n[i]*Po_n[i] + Sw_n[i]*Pw_n[i];
+                    ErSo_Bo_n[i] = Er(meanP) * So_n[i] / Bo(Po_n[i]);
+                    ErSw_Bw_n[i] = Er(meanP) * Sw_n[i] / Bw(Pw_n[i]);
                     ErSo_Bo_np1[i] = new(); ErSw_Bw_np1[i] = new();
                 }
             }
 
-            Qwells_n = new double[Nwells];  Pwells_n = new double[Nwells];
+            Pwells_n = new double[Nwells]; Qwells_n = new double[Nwells];
             for (int i = 0; i < Nwells; i++)
             {
                 Qwells_n[i] = 0; // Start with no flow
                 Wells[i].ComputeNaturalIndex(Nx, Ny);
+                Wells[i].ComputeProductivityIndex(Kx, Ky, Dx, Dy, Dz);
                 switch (Wells[i].WellType)
                 {
                     case WellType.Producer:
@@ -513,58 +568,6 @@ namespace ReservoirSimulator
                 xs[2*Ngrids + 2*i] = new(Pwells_n[i], 2*Ngrids + 2*i);
                 xs[2*Ngrids + 2*i + 1] = new(Qwells_n[i], 2*Ngrids + 2*i + 1); 
                 Res[2*Ngrids + 2*i] = new(); Res[2*Ngrids + 2*i+1] = new();
-            }
-            (ErSo_Bo_n, ErSw_Bw_n) = PoreVolumeFraction(Po_n, Pw_n, So_n, Sw_n);
-        }
-
-        void GuessReset()
-        {
-            int indx = 0;
-            for (int i = 0; i < Ngrids; i++)
-            {
-                xs[indx++].Value = Po_n[i];  // Matches Po index
-                xs[indx++].Value = Sw_n[i];  // Matches Sw index
-            }
-            for (int i = 0; i < Nwells; i++)
-            {
-                xs[indx++].Value = Pwells_n[i]; // Matches Pwf index
-                xs[indx++].Value = Qwells_n[i]; // Matches Q index
-            }
-        }
-
-        void ExtractSolution()
-        {
-            int indx = 0;
-            for (int i = 0; i < Ngrids; i++)
-            {
-                Po_n[i] = xs[indx++].Value;  // Matches Po index
-                Sw_n[i] = xs[indx++].Value;  // Matches Sw index
-            }
-            for (int i = 0; i < Nwells; i++)
-            {
-                Pwells_n[i] = xs[indx++].Value; // Matches Pwf index
-                Qwells_n[i] = xs[indx++].Value; // Matches Q index
-            }
-        }
-
-        (double[], double[]) PoreVolumeFraction(double[] Po, double[] Pw, double[] So, double[] Sw)
-        {
-            double[] Fo = new double[Ngrids], Fw = new double[Ngrids];
-            for (int i = 0; i < Ngrids; i++)
-            {
-                double meanP = So[i]*Po[i] + Sw[i]*Pw[i];
-                Fw[i] = Er(meanP) * Sw[i] / Bw(Pw[i]);
-                Fo[i] = Er(meanP) * So[i] / Bo(Po[i]);
-            }
-            return (Fo, Fw);
-        }
-
-        void PoreVolumeUpdate()
-        {
-            for (int i = 0; i < Ngrids; i++)
-            {
-                ErSo_Bo_n[i] = ErSo_Bo_np1[i].Value;
-                ErSw_Bw_n[i] = ErSw_Bw_np1[i].Value;
             }
         }
 
@@ -632,8 +635,12 @@ namespace ReservoirSimulator
             void Residual(ADiff[] xnp1, double time)
             {
                 funcall++;
-                double re, WI, Zref; 
+                double WI, Zref; 
                 ScratchPad Wellscratchpad = new();
+
+                int totalItems = Ngrids;
+                int cores = Environment.ProcessorCount;
+                int chunkSize = totalItems / cores;
 
                 void ComputeBlockPVT(ScratchPad scratchpad, int m)
                 {
@@ -658,6 +665,15 @@ namespace ReservoirSimulator
                         SubtractInPlace(scratchpad.Gw_m).
                         MultiplyInPlace(Z[m]).
                         AddInPlace(scratchpad.Pw_m);
+                    scratchpad.SoPo_m.
+                        CopyFrom(scratchpad.So_m).
+                        MultiplyInPlace(scratchpad.Po_m);
+                    scratchpad.SwPw_m.
+                        CopyFrom(scratchpad.Sw_m).
+                        MultiplyInPlace(scratchpad.Pw_m);
+                    scratchpad.meanP.
+                        CopyFrom(scratchpad.SoPo_m).
+                        AddInPlace(scratchpad.SwPw_m);
                 }
 
                 void AddFluxes(Direction dir, int m, int n, ScratchPad scratchpad)
@@ -675,16 +691,12 @@ namespace ReservoirSimulator
                     μw(scratchpad.Pw_n, scratchpad.Uw_n);
                     Kro(scratchpad.So_n, scratchpad.Kro_n);
                     Krw(scratchpad.Sw_n, scratchpad.Krw_n);
-                    scratchpad.PmGZo_n.
-                        SubtractInPlace(scratchpad.Go_n).
-                        MultiplyInPlace(Z[n]).
-                        AddInPlace(scratchpad.Po_n);
-                    scratchpad.PmGZw_n.
-                        SubtractInPlace(scratchpad.Gw_n).
-                        MultiplyInPlace(Z[n]).
-                        AddInPlace(scratchpad.Pw_n);
+                    scratchpad.PmGZo_n.CopyFrom(scratchpad.Po_n).
+                        SubtractProductInPlace(scratchpad.Go_n, Z[n]);
+                    scratchpad.PmGZw_n.CopyFrom(scratchpad.Pw_n).
+                        SubtractProductInPlace(scratchpad.Gw_n, Z[n]);
 
-                    ADiff Tr = scratchpad.Tr.AddInPlace(Transmissibility(dir, m, n)),
+                    ADiff Tr = scratchpad.Tr.CopyFrom(Transmissibility(dir, m, n)),
                           po_m = scratchpad.Po_m, bo_m = scratchpad.Bo_m, go_m = scratchpad.Go_m,
                           μo_m = scratchpad.Uo_m, kro_m = scratchpad.Kro_m, pmgzo_m = scratchpad.PmGZo_m,
 
@@ -695,15 +707,19 @@ namespace ReservoirSimulator
                           μo_n = scratchpad.Uo_n, kro_n = scratchpad.Kro_n, pmgzo_n = scratchpad.PmGZo_n,
 
                           pw_n = scratchpad.Pw_n, bw_n = scratchpad.Bw_n, gw_n = scratchpad.Gw_n,
-                          μw_n = scratchpad.Uw_n, krw_n = scratchpad.Krw_n, pmgzw_n = scratchpad.PmGZw_n;
+                          μw_n = scratchpad.Uw_n, krw_n = scratchpad.Krw_n, pmgzw_n = scratchpad.PmGZw_n,
+                          
+                          go_avg = scratchpad.Go_avg, gw_avg = scratchpad.Gw_avg;
 
 
+                    scratchpad.Oil_Rate.CopyFrom(po_n).SubtractInPlace(po_m);
+                    scratchpad.Water_Rate.CopyFrom(pw_n).SubtractInPlace(pw_m);
+                    scratchpad.Go_avg.CopyFrom(go_m).AddInPlace(go_n).MultiplyInPlace(0.5);
+                    scratchpad.Gw_avg.CopyFrom(gw_m).AddInPlace(gw_n).MultiplyInPlace(0.5);
                     if (pmgzo_m >= pmgzo_n)
                     {
                         scratchpad.Oil_Rate.
-                            CopyFrom(po_n).
-                            SubtractInPlace(po_m).
-                            SubtractProductInPlace(go_m, Z[n] - Z[m]).
+                            SubtractProductInPlace(go_avg, Z[n] - Z[m]).
                             MultiplyInPlace(Tr).
                             MultiplyInPlace(kro_m).
                             DivideInPlace(bo_m).
@@ -712,9 +728,7 @@ namespace ReservoirSimulator
                     else
                     {
                         scratchpad.Oil_Rate.
-                            CopyFrom(po_n).
-                            SubtractInPlace(po_m).
-                            SubtractProductInPlace(go_n, Z[n] - Z[m]).
+                            SubtractProductInPlace(go_avg, Z[n] - Z[m]).
                             MultiplyInPlace(Tr).
                             MultiplyInPlace(kro_n).
                             DivideInPlace(bo_n).
@@ -726,9 +740,7 @@ namespace ReservoirSimulator
                     if (pmgzw_m >= pmgzw_n)
                     {
                         scratchpad.Water_Rate.
-                            CopyFrom(pw_n).
-                            SubtractInPlace(pw_m).
-                            SubtractProductInPlace(gw_m, Z[n] - Z[m]).
+                            SubtractProductInPlace(gw_avg, Z[n] - Z[m]).
                             MultiplyInPlace(Tr).
                             MultiplyInPlace(krw_m).
                             DivideInPlace(bw_m).
@@ -737,9 +749,7 @@ namespace ReservoirSimulator
                     else
                     {
                         scratchpad.Water_Rate.
-                            CopyFrom(pw_n).
-                            SubtractInPlace(pw_m).
-                            SubtractProductInPlace(gw_n, Z[n] - Z[m]).
+                            SubtractProductInPlace(gw_avg, Z[n] - Z[m]).
                             MultiplyInPlace(Tr).
                             MultiplyInPlace(krw_n).
                             DivideInPlace(bw_n).
@@ -748,6 +758,38 @@ namespace ReservoirSimulator
                     Res[2*m+1].AddProductInPlace(scratchpad.Water_Rate, dt);
                 }
 
+                void AddAquiferFluxes(AquiferFlowDirection Flowdir, int m, ScratchPad scratchpad, double Pa, double Ceff)
+                {
+                    double Tr = Flowdir switch
+                    {
+                        AquiferFlowDirection.Iminus => Transmissibility(xDir, m, m),
+                        AquiferFlowDirection.Iplus => Transmissibility(xDir, m, m),
+                        AquiferFlowDirection.Jminus => Transmissibility(yDir, m, m),
+                        AquiferFlowDirection.Jplus => Transmissibility(yDir, m, m),
+                        AquiferFlowDirection.Kminus => Transmissibility(zDir, m, m),
+                        AquiferFlowDirection.Kplus => Transmissibility(zDir, m, m),
+                        _ => 0
+                    };
+
+                    ADiff pw_m = scratchpad.Pw_m, bw_m = scratchpad.Bw_m, 
+                          gw_m = scratchpad.Gw_m, μw_m = scratchpad.Uw_m,
+                          DP = scratchpad.DP.CopyFrom(Pa).SubtractInPlace(pw_m), 
+                          Tw = scratchpad.Tw.CopyFrom(Tr).MultiplyInPlace(krw0).
+                                DivideInPlace(bw_m).DivideInPlace(μw_m);
+
+                    DP.SubtractInPlace(pw_m);
+
+                    Res[2*m+1].AddProductInPlace(
+                        (Flowdir switch
+                        {
+                            AquiferFlowDirection.Kminus => DP.AddProductInPlace(gw_m, 0.5*Dz[m]),
+                            AquiferFlowDirection.Kplus => DP.SubtractProductInPlace(gw_m, 0.5*Dz[m]),
+                            _ => DP
+                        }).MultiplyInPlace(Tw), dt);
+                }
+
+
+
                 Parallel.For(0, Ngrids,
                     // Thread-local initializer: This creates ONE scratchpad instance 
                     // per CPU thread, rather than one per loop iteration!
@@ -755,22 +797,12 @@ namespace ReservoirSimulator
 
                     // The actual loop work
                     (m, loopState, scratchpad) =>
-                    {
+                    { 
                         int indx1 = 2*m, indx2 = 2*m + 1;
                         scratchpad.ClearMVariables();
                         ComputeBlockPVT(scratchpad, m);
 
                         double PV = -Dx[m]*Dy[m]*Dz[m]*Φ[m]/beta;
-
-                        ADiff SoPo = scratchpad.SoPo_m, SwPw = scratchpad.SwPw_m;
-
-                        SoPo.AddInPlace(scratchpad.So_m).
-                        MultiplyInPlace(scratchpad.Po_m);
-
-                        SwPw.AddInPlace(scratchpad.Sw_m).
-                        MultiplyInPlace(scratchpad.Pw_m);
-
-                        scratchpad.meanP.CopyFrom(SoPo).AddInPlace(SwPw);
                         Er(scratchpad.meanP, scratchpad.Er);
 
                         ErSo_Bo_np1[m].
@@ -801,6 +833,9 @@ namespace ReservoirSimulator
                         if (j < Ly) AddFluxes(yDir, m, m+Nx, scratchpad);
                         if (k > 0) AddFluxes(zDir, m, m-NxNy, scratchpad);
                         if (k < Lz) AddFluxes(zDir, m, m+NxNy, scratchpad);
+                        // Add aquifer fluxes if an aquifer is present and connected to this grid block
+                        if (Aquifer != null && Aquifer.IsthereAquiferFlow(i, j, k))
+                            AddAquiferFluxes(Aquifer.FlowDirection, m, scratchpad, Aquifer.Pa, Aquifer.Connectivity_Efficiency);
 
                         // Pass the scratchpad forward to be reused by the next iteration on this thread
                         return scratchpad;
@@ -828,10 +863,7 @@ namespace ReservoirSimulator
                                 int indx1 = 2*m, indx2 = 2*m+1;
                                 Wellscratchpad.ClearMVariables();
                                 ComputeBlockPVT(Wellscratchpad, m);
-
-                                re = 0.28*Hypot(Pow(Ky[m]/Kx[m], 0.25)*Dx[m], Pow(Kx[m]/Ky[m], 0.25)*Dy[m])/
-                                    (Pow(Ky[m]/Kx[m], 0.25) + Pow(Kx[m]/Ky[m], 0.25));
-                                WI = alpha_well*Sqrt(Kx[m]*Ky[m])*Dz[m]/(Log(re/well.Radius) + well.Skin);
+                                WI = well.Perforation_WI[well.Perforation_NatIndex.IndexOf(m)];
 
                                 Wellscratchpad.Oil_Rate.CopyFrom(pwell).
                                     SubtractInPlace(Wellscratchpad.Po_m).
@@ -865,10 +897,7 @@ namespace ReservoirSimulator
                                 int indx1 = 2*m, indx2 = 2*m+1;
                                 Wellscratchpad.ClearMVariables();
                                 ComputeBlockPVT(Wellscratchpad, m);
-
-                                re = 0.28*Hypot(Pow(Ky[m]/Kx[m], 0.25)*Dx[m], Pow(Kx[m]/Ky[m], 0.25)*Dy[m])/
-                                    (Pow(Ky[m]/Kx[m], 0.25) + Pow(Kx[m]/Ky[m], 0.25));
-                                WI = alpha_well*Sqrt(Kx[m]*Ky[m])*Dz[m]/(Log(re/well.Radius) + well.Skin);
+                                WI = well.Perforation_WI[well.Perforation_NatIndex.IndexOf(m)];
 
                                 Wellscratchpad.Water_Rate.CopyFrom(pwell).
                                     SubtractInPlace(Wellscratchpad.Pw_m).
@@ -927,7 +956,7 @@ namespace ReservoirSimulator
                     // find the next state solution
                     Console.WriteLine($"""
                     Time: 
-                    {tnp1:F3} days
+                    {tnp1:E3} days
                         iter  |   Residual Norm  
                     ----------+----------------
                     """);
@@ -936,9 +965,9 @@ namespace ReservoirSimulator
                     {
                         // Solve the nonlinear system using Newton-Raphson method
                         Residual(xs, tnp1);  rnorm = b.Max(Abs);
-                        double[] dx = MklSparseSolver.Solve([.. a_value], [.. a_index], [.. a_start], [.. b]);
+                        double[] dx = LinSolve(a_value, a_index, a_start, b);
                         for (int v = 0; v < varNum; v++) xs[v].Value -= dx[v];
-                        Console.WriteLine($"  {iter,4}    |    {rnorm:F4}");
+                        Console.WriteLine($"  {iter,4}    |    {rnorm:E4}");
                         isConverged = rnorm < 1e-6;
                         if (isConverged) break;
                     }
@@ -959,25 +988,25 @@ namespace ReservoirSimulator
                     }
 
                     // Unpack solution values to evaluate operational constraint validations
-                    double maxDP = 0, maxDS = 0;
-                    for (int m = 0; m < Ngrids; m++)
+                    var Sol = ExtractSolution();
+                    if(Sol.maxDP > 100 || Sol.maxDS > 0.15)
                     {
-                        maxDP = Max(maxDP, Abs(xs[2*m].Value - Po_n[m]));
-                        maxDS = Max(maxDS, Abs(xs[2*m+1].Value - Sw_n[m]));
-                    }
-                    if(maxDP > 100 || maxDS > 0.15)
-                    {
+                        Console.ForegroundColor = ConsoleColor.Yellow;
+                        Console.WriteLine($"\n[Warning] Time Step Rejected: State Change Limit Exceeded.");
+                        Console.ResetColor();
+                        Console.WriteLine($"    ↳ Location       : Cell Index {Sol.j}");
+                        Console.WriteLine($"    ↳ Violation      : {(Sol.maxDP > 100 ? "ΔP" : "ΔS")} = {(Sol.maxDP > 100 ? Sol.maxDP.ToString("F4") : Sol.maxDS.ToString("F4"))} (Max Allowed: {(Sol.maxDP > 100 ? 400.ToString("F4") : 0.15.ToString("F4"))})");
+                        Console.WriteLine($"    ↳ Current State  : P = {Po_n[Sol.j]:F1} psi | Sw = {Sw_n[Sol.j]:F4}");
+                        Console.WriteLine($"    ↳ Attempted State: P = {Sol.Po[Sol.j]:F1} psi | Sw = {Sol.Sw[Sol.j]:F4}");
+                        Console.WriteLine($"    ↳ Solver Action  : Rolling back to t = {t:F3} days.");
+                        Console.WriteLine($"    ↳ Time-Step Chop : Reducing Δt from {dt:F2} to {0.5*dt:F2} days (Factor: 0.5).\n");
                         dt = 0.5*dt;
                         GuessReset();
                         continue;
                     }
-
-                    ExtractSolution();
-                    // Quality Check:
                     
                     // Track the maximum time step that still yields convergence for potential future use in adaptive time-stepping
                     history_dtmax = Max(dt, history_dtmax);
-
                     for (int n = 0; n < Nwells; n++)
                     {
                         // Validate Producer constraints:
@@ -985,7 +1014,7 @@ namespace ReservoirSimulator
                         {
                             // switch to BHP control if pressure falls below minimum limits
                             if (Wells[n].ConstraintType == ConstraintType.FlowRate &&
-                                Pwells_n[n] < Wells[n].MinPressure)
+                                Sol.Pwell[n] < Wells[n].MinPressure)
                             {
                                 Wells[n].ConstraintType = ConstraintType.MinPressure;
                                 Console.WriteLine("""
@@ -1004,7 +1033,7 @@ namespace ReservoirSimulator
 
                             // switch to BHP control if pressure exceeds fracturing limits
                             if (Wells[n].ConstraintType == ConstraintType.FlowRate &&
-                                Pwells_n[n] > Wells[n].MaxPressure)
+                                Sol.Pwell[n] > Wells[n].MaxPressure)
                             {
                                 Wells[n].ConstraintType = ConstraintType.MaxPressure;
                                 Console.WriteLine("""
@@ -1024,12 +1053,17 @@ namespace ReservoirSimulator
                     }
 
                     // Log verified parameters to performance history arrays
-
+                    Po_n = Sol.Po; Sw_n = Sol.Sw; Pwells_n = Sol.Pwell; Qwells_n = Sol.Qwell; 
                     Time.Add(t = tnp1); isComplete = Abs(t - L) < 1e-13;
                     P.Add([..Po_n]); S.Add([..Sw_n]); Rate.Add([..Qwells_n]); Pwf.Add([..Pwells_n]);
                     WaterCut.Add([.. Wells.Select(w => w.WaterCut)]);
                     SweepEff.Add((Sw_n.Sum() - S[0].Sum())*100/(Ngrids - S[0].Sum()));
-                    PoreVolumeUpdate();
+                    for (int m = 0; m < Ngrids; m++)
+                    {
+                        ErSo_Bo_n[m] = ErSo_Bo_np1[m].Value;
+                        ErSw_Bw_n[m] = ErSw_Bw_np1[m].Value;
+                    }
+
                     // Adaptive Time-Stepping Logic:
                     // scale dt up if convergence is fast, scale down if slow
                     if (iter < 4) dt = 1.25*dt;
@@ -1039,7 +1073,7 @@ namespace ReservoirSimulator
                     // Prevent Overshoot
                     if (!isComplete) dt = Min(dt, L - t);
                 }
-                if (history_dtmax > 0) dt = 0.1*history_dtmax;
+                if (history_dtmax > 0) dt = 0.5*history_dtmax;
             }
         }
 
