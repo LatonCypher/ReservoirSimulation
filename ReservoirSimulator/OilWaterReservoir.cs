@@ -44,33 +44,38 @@ namespace ReservoirSimulator
             return [.. Y[i-1].Zip(Y[i], (a, b) => betweenab(a, b, f))];
         }
         double Harmmean(double x1, double x2) => 2/(1/x1 + 1/x2);
-        (double[] Po, double[] Sw, double[] Pwell, double[] Qwell, double maxDP, double maxDS, int j) Unpack(ADiff[] x)
+        (double[] Po, double[] Sw, double[] Pwell, double[] Qwell, double maxDP, double maxDS, int i_p, int i_s) ExtractSolution()
         {
-            int indx = 0, j = 0; double maxDp = 0, maxDs = 0;
+            int indx = 0, i_p = 0, i_s = 0; double maxDp = 0, maxDs = 0;
             double[] Po = new double[Ngrids], Sw = new double[Ngrids],
                      Pwell = new double[Nwells], Qwell = new double[Nwells];
             for (int i = 0; i < Ngrids; i++)
             {
-                Po[i] = x[indx++].Value; // Matches Po index
-                Sw[i] = x[indx++].Value; // Matches Sw index
-                maxDp = Max(maxDp, Abs(Po[i] - Po_n[i]));
-                if(Abs(Sw[i] - Sw_n[i]) > maxDs)
-                { j = i; maxDs = Abs(Sw[i] - Sw_n[i]); }
+                Po[i] = xs[indx++].Value; // Matches Po index
+                Sw[i] = xs[indx++].Value; // Matches Sw index
+                if (Abs(Po[i] - Po_n[i]) > maxDp)
+                { i_p = i; maxDp = Abs(Po[i] - Po_n[i]); }
+                if (Abs(Sw[i] - Sw_n[i]) > maxDs)
+                { i_s = i; maxDs = Abs(Sw[i] - Sw_n[i]); }
             }
             for (int i = 0; i < Nwells; i++)
             {
-                Pwell[i] = x[indx++].Value; // Matches Pwf index
-                Qwell[i] = x[indx++].Value; // Matches Q index
+                Pwell[i] = xs[indx++].Value; // Matches Pwf index
+                Qwell[i] = xs[indx++].Value; // Matches Q index
             }
-            return (Po, Sw, Pwell, Qwell, maxDp, maxDs, j);
+            return (Po, Sw, Pwell, Qwell, maxDp, maxDs, i_p, i_s);
         }
-        void GuessReset()
+        double dt, t = 0;
+        void InitialGuess()
         {
-            int indx = 0;
+            int indx = 0, n = Time.Count-1;
+
+            double omega = n < 2 ? 0 : dt/(Time[n]-Time[n-1]);
             for (int i = 0; i < Ngrids; i++)
             {
-                xs[indx++].Value = Po_n[i];  // Matches Po index
-                xs[indx++].Value = Sw_n[i];  // Matches Sw index
+                xs[indx++].Value = Po_n[i];                          // Matches Po index
+                if (n >= 2) xs[indx] += omega*(Po_n[i] - P[n-1][i]); // Extrapolation
+                xs[indx++].Value = Sw_n[i];                          // Matches Sw index
             }
             for (int i = 0; i < Nwells; i++)
             {
@@ -91,12 +96,14 @@ namespace ReservoirSimulator
             μo0, μw0, γo0, γw0, P_datum, Z_datum, Pc_max;
         List<Well> Wells;
         Aquifer Aquifer;
+        double[,] Trans;
+        bool[,] Water_Upstream, Oil_Upstream;
         public OilWaterReservoir(
             // DIMENS
             int _nx, int _ny, int _nz,
 
             // GRID
-            double[] _dx, double[] _dy,  double[] _dz, double[] _zTop, 
+            double[] _dx, double[] _dy, double[] _dz, double[] _zTop,
             double[] _perm, double[] _phi, double _mult_z,
 
             // PVTW
@@ -115,17 +122,17 @@ namespace ReservoirSimulator
             double _ρo0, double _ρw0,
 
             // EQUIL     
-            double _datum, double _pdatun, double _z_woc, double _pcwoc,  
-            
+            double _datum, double _pdatun, double _z_woc, double _pcwoc,
+
             // WELL
             List<Well> _wells,
 
             // AQUIFER
-            Aquifer _aquifer = null )
+            Aquifer _aquifer = null)
         {
             ADiff.capacity = 16;
             Nx = _nx; Ny = _ny; Nz = _nz; NxNy = Nx*Ny; Ngrids = Nx*Ny*Nz;
-            Dx = _dx; Dy = _dy; Dz = _dz; Kx = _perm; Ky = _perm; 
+            Dx = _dx; Dy = _dy; Dz = _dz; Kx = _perm; Ky = _perm;
             Kz = [.. _perm.Select(k => k*_mult_z)]; Φ = _phi;
             Wells = _wells; Aquifer = _aquifer;
 
@@ -166,9 +173,10 @@ namespace ReservoirSimulator
             var pcresult = swof.FitBrooksCoreyPc();
             var krresult = swof.FitCoreyPermeability();
             Pe = pcresult.Pd; np = pcresult.Lambda; Sw_r = pcresult.Swi;
-            So_r = krresult.Sor; kro0 = krresult.KroEndpoint; 
+            So_r = krresult.Sor; kro0 = krresult.KroEndpoint;
             krw0 = krresult.KrwEndpoint; no = krresult.No; nw = krresult.Nw;
-            Pc_max = 150;
+            Pc_max = 150; 
+
             Sws = Sw => (Sw - Sw_r)/(1 - Sw_r);
             Swe = Sw => (Sw - Sw_r)/(1 - Sw_r - So_r);
             Pc_D = Sw => Pe <= 1e-12 ? 0.0 :
@@ -182,17 +190,14 @@ namespace ReservoirSimulator
             Kro = So => So <= So_r ? 0 : kro0 * Pow(1 - Swe(1 - So), no);
             Krw = Sw => Sw <= Sw_r ? 0 : krw0 * Pow(Swe(Sw), nw);
 
-
-
             //Extract ROCK
             cr = _cr; Prefr = _pref_r;
             Er = P => Exp(cr*(P - Prefr));
 
-
             // Extract datum
             Z_woc = _z_woc; P_datum = _pdatun; Z_datum = _datum;
             if (_datum < _z_woc)
-            { 
+            {
                 Po_woc = P_datum + γo(P_datum).Value*(Z_woc - Z_datum);
                 Pw_woc = Po_woc - Pe;
             }
@@ -218,9 +223,9 @@ namespace ReservoirSimulator
             Nx = _nx; Ny = _ny; Nz = _nz; NxNy = Nx*Ny; Ngrids = Nx*Ny*Nz;
             Dx = _dx; Dy = _dy; Dz = _dz; Z = _z; Φ = _phi; kro0 = _kro0;
             krw0 = _krw0; Bo0 = _bo0; Bw0 = _bw0; Pb = _pb; Prefw = _pref;
-            Prefr = _pref; Pe = _peow; So_r = _so_r; Sw_r = _sw_r; co = _co; 
-            cw = _cw; cr = _cr; bo = _bo; bw = _bw; no = _no; nw = _nw; 
-            np = 0.7; μo0 = _μo0; μw0 = _μw0; γo0 = _γo0; γw0 = _γw0; 
+            Prefr = _pref; Pe = _peow; So_r = _so_r; Sw_r = _sw_r; co = _co;
+            cw = _cw; cr = _cr; bo = _bo; bw = _bw; no = _no; nw = _nw;
+            np = 0.7; μo0 = _μo0; μw0 = _μw0; γo0 = _γo0; γw0 = _γw0;
             Pw_woc = _pw_woc; Po_woc = Pw_woc + Pe; Z_woc = _z_woc;
             Wells = _wells; Nwells = Wells.Count; varNum = 2*Ngrids + 2*Nwells;
             Aquifer = _aquifer;
@@ -250,6 +255,7 @@ namespace ReservoirSimulator
         public void Initialize()
         {
             funcall = 0;
+
             // 2. Initialize the spatial grid blocks
             Pw_n = new double[Ngrids]; Sw_n = new double[Ngrids];
             Po_n = new double[Ngrids]; So_n = new double[Ngrids];
@@ -261,16 +267,26 @@ namespace ReservoirSimulator
             {
                 for (int i = 0; i < Ngrids; i++)
                 {
-                    Pw_n[i] = Pw_woc + (Z[i] > Z_woc ? γw(Pw_woc) : γo(Pw_woc)).Value * (Z[i] - Z_woc);
-                    Po_n[i] = Pw_n[i]; Sw_n[i] = Z[i] > Z_woc ? 1 : Sw_r; 
-                    
+                    if (Z[i] < Z_woc)
+                    {
+                        double p = Po_woc + γo(Po_woc).Value * (Z[i] - Z_woc);
+                        Po_n[i] = Po_woc + 0.5*(γo(p) + γo(Po_woc)).Value * (Z[i] - Z_woc);
+                        Pw_n[i] = Po_n[i]; Sw_n[i] = Sw_r;
+                    }
+                    else
+                    {
+                        double p = Pw_woc + γw(Pw_woc).Value * (Z[i] - Z_woc);
+                        Pw_n[i] = Pw_woc + 0.5*(γw(p) + γw(Pw_woc)).Value * (Z[i] - Z_woc);
+                        Po_n[i] = Pw_n[i]; Sw_n[i] = 1;
+                    }
+
                     So_n[i] = 1.0 - Sw_n[i];
-                    xs[2*i] = new(Po_n[i], 2*i); 
+                    xs[2*i] = new(Po_n[i], 2*i);
                     xs[2*i+1] = new(Sw_n[i], 2*i+1);
                     Res[2*i] = new(); Res[2*i+1] = new();
-                    double Pmean = Po_n[i]*So_n[i] + Pw_n[i]*Sw_n[i];
-                    ErSo_Bo_n[i] = (Er(Pmean) * So_n[i] / Bo(Po_n[i])).Value;
-                    ErSw_Bw_n[i] = (Er(Pmean) * Sw_n[i] / Bo(Pw_n[i])).Value;
+                    double meanP = So_n[i]*Po_n[i] + Sw_n[i]*Pw_n[i];
+                    ErSo_Bo_n[i] = (Er(meanP) * So_n[i] / Bo(Po_n[i])).Value;
+                    ErSw_Bw_n[i] = (Er(meanP) * Sw_n[i] / Bw(Pw_n[i])).Value;
                     ErSo_Bo_np1[i] = new(); ErSw_Bw_np1[i] = new();
                 }
             }
@@ -279,7 +295,7 @@ namespace ReservoirSimulator
                 // 1. Pre-generate a fine lookup table for the inverse Capillary Pressure relationship
                 List<double> Sw_Table = [.. Linspace(1.0-So_r-1e-5, Sw_r+1e-5, 50)];
                 // Calculate Pc for each Sw point in our table
-                List<double> Pc_Table = [.. Sw_Table.Select(sw => Pc_D(sw).Value)];
+                List<double> Pc_Table = [.. Sw_Table.Select(s => Pc_D(s).Value)];
 
                 for (int i = 0; i < Ngrids; i++)
                 {
@@ -302,9 +318,9 @@ namespace ReservoirSimulator
                     xs[2*i] = new(Po_n[i], 2*i);
                     xs[2*i+1] = new(Sw_n[i], 2*i+1);
                     Res[2*i] = new(); Res[2*i+1] = new();
-                    double Pmean = Po_n[i]*So_n[i] + Pw_n[i]*Sw_n[i];
-                    ErSo_Bo_n[i] = (Er(Pmean) * So_n[i] / Bo(Po_n[i])).Value;
-                    ErSw_Bw_n[i] = (Er(Pmean) * Sw_n[i] / Bo(Pw_n[i])).Value;
+                    double meanP = So_n[i]*Po_n[i] + Sw_n[i]*Pw_n[i];
+                    ErSo_Bo_n[i] = (Er(meanP) * So_n[i] / Bo(Po_n[i])).Value;
+                    ErSw_Bw_n[i] = (Er(meanP) * Sw_n[i] / Bw(Pw_n[i])).Value;
                     ErSo_Bo_np1[i] = new(); ErSw_Bw_np1[i] = new();
                 }
             }
@@ -332,10 +348,10 @@ namespace ReservoirSimulator
             }
         }
 
-        public static (List<int>, List<int>, List<double>) DeleteCol(List<int> a_start, 
+        public static (List<int>, List<int>, List<double>) DeleteCol(List<int> a_start,
             List<int> a_index, List<double> a_value, List<int> index2delete)
         {
-            if(index2delete.Count == 0)
+            if (index2delete.Count == 0)
                 return (a_start, a_index, a_value);
 
             // 1. Build a global column remapping array (O(ColCount))
@@ -376,59 +392,90 @@ namespace ReservoirSimulator
         public void Simulate2Phase(double[] ResultTime, List<Well> Wells)
         {
             int Lx = Nx - 1, Ly = Ny - 1, Lz = Nz - 1;
-            double dt, t = 0;
-
             Direction xDir = Direction.X, yDir = Direction.Y, zDir = Direction.Z;
-
+            FlowDirection Xminus = FlowDirection.Iminus, Xplus = FlowDirection.Iplus,
+                          Yminus = FlowDirection.Jminus, Yplus = FlowDirection.Jplus,
+                          Zminus = FlowDirection.Kminus, Zplus = FlowDirection.Kplus;
+            bool Upstreamlock = false;
             int totalItems = Ngrids;
             int cores = Environment.ProcessorCount;
             int chunkSize = totalItems / cores;
+            Trans = new double[Ngrids, 6];
+            Water_Upstream = new bool[Ngrids, 6];
+            Oil_Upstream = new bool[Ngrids, 6];
+
+            Parallel.For(0, cores, coreId =>
+            {
+                int start = coreId * chunkSize;
+                int end = (coreId == cores - 1) ? totalItems : start + chunkSize;
+
+                // A single core executes this inner sequential loop at absolute maximum hardware speed
+                for (int m = start; m < end; m++)
+                {
+                    int k = m / NxNy, rem = m % NxNy,
+                    j = rem / Nx, i = rem % Nx;
+
+                    // Add fluxes to the residual for this grid block from each of its 6 neighbors
+                    if (i > 0) Trans[m, (int)Xminus] = Transmissibility(xDir, m, m - 1);
+                    if (i < Lx) Trans[m, (int)Xplus] = Transmissibility(xDir, m, m + 1);
+                    if (j > 0) Trans[m, (int)Yminus] = Transmissibility(yDir, m, m - Nx);
+                    if (j < Ly) Trans[m, (int)Yplus] = Transmissibility(yDir, m, m + Nx);
+                    if (k > 0) Trans[m, (int)Zminus] = Transmissibility(zDir, m, m - NxNy);
+                    if (k < Lz) Trans[m, (int)Zplus] = Transmissibility(zDir, m, m + NxNy);
+                }
+            });
+
+            void CheckUpstream(FlowDirection Flowdir, int m, ADiff OilPot, ADiff WaterPot)
+            {
+                Oil_Upstream[m, (int)Flowdir] = OilPot > 0;
+                Water_Upstream[m, (int)Flowdir] = WaterPot > 0;
+            }
 
             void Residual(ADiff[] xnp1, double time)
             {
                 funcall++;
                 double WI, Zref; ADiff WIw, WIo, pwell, qwell;
 
-                void AddFluxes(Direction dir, int m, int n)
+                void AddFluxes(FlowDirection Flowdir, int m, int n)
                 {
                     ADiff Po_up, Pw_up, So_up, Sw_up, Tw, To;
-                    double Tr = Transmissibility(dir, m, n); 
+                    double Tr = Trans[m, (int)Flowdir];
                     int indx1, indx2;
                     ADiff po_n = xnp1[indx1 = 2*n],
                         sw_n = xnp1[indx2 = 2*n+1],
                         pw_n = po_n - Pc_I(sw_n),
                         so_n = 1 - sw_n,
-                        pmgoz_n = po_n - γo(po_n)*Z[n],
-                        pmgwz_n = pw_n - γw(pw_n)*Z[n],
                         po_m = xnp1[indx1 = 2*m],
                         sw_m = xnp1[indx2 = 2*m+1],
                         pw_m = po_m - Pc_I(sw_m),
                         so_m = 1 - sw_m,
-                        pmgoz_m = po_m - γo(po_m)*Z[m],
-                        pmgwz_m = pw_m - γw(pw_m)*Z[m],
                         go_avg = 0.5*(γo(po_m) + γo(po_n)),
-                        gw_avg = 0.5*(γw(pw_m) + γw(pw_n));
+                        gw_avg = 0.5*(γw(pw_m) + γw(pw_n)),
+                        DΦo = po_n - po_m - go_avg * (Z[n] - Z[m]),
+                        DΦw = pw_n - pw_m - gw_avg * (Z[n] - Z[m]);
 
-                    (Po_up, So_up) = pmgoz_m >= pmgoz_n ? (po_m, so_m) : (po_n, so_n);
+                    if (!Upstreamlock) CheckUpstream(Flowdir, m, DΦo, DΦw);
+
+                    (Po_up, So_up) = Oil_Upstream[m, (int)Flowdir] ? (po_n, so_n) : (po_m, so_m);
                     To = Tr*Kro(So_up)/(μo(Po_up)*Bo(Po_up));
-                    Res[indx1] += To*(po_n - po_m - go_avg*(Z[n] - Z[m]))*dt;
+                    Res[indx1] += To* DΦo * dt;
 
-                    (Pw_up, Sw_up) = pmgwz_m >= pmgwz_n ? (pw_m, sw_m) : (pw_n, sw_n);
+                    (Pw_up, Sw_up) = Water_Upstream[m, (int)Flowdir] ? (pw_n, sw_n) : (pw_m, sw_m);
                     Tw = Tr*Krw(Sw_up)/(μw(Pw_up)*Bw(Pw_up));
-                    Res[indx2] += Tw*(pw_n - pw_m - gw_avg*(Z[n] - Z[m]))*dt;
+                    Res[indx2] += Tw* DΦw * dt;
                 }
 
-                void AddAquiferFluxes(AquiferFlowDirection Flowdir, int m, double Pa, double Ceff)
+                void AddAquiferFluxes(FlowDirection Flowdir, int m, double Pa, double Ceff)
                 {
                     ADiff Tw;
                     double Tr = Flowdir switch
                     {
-                        AquiferFlowDirection.Iminus => Transmissibility(xDir, m, m),
-                        AquiferFlowDirection.Iplus => Transmissibility(xDir, m, m),
-                        AquiferFlowDirection.Jminus => Transmissibility(yDir, m, m),
-                        AquiferFlowDirection.Jplus => Transmissibility(yDir, m, m),
-                        AquiferFlowDirection.Kminus => Transmissibility(zDir, m, m),
-                        AquiferFlowDirection.Kplus => Transmissibility(zDir, m, m),
+                        FlowDirection.Iminus => Transmissibility(xDir, m, m),
+                        FlowDirection.Iplus => Transmissibility(xDir, m, m),
+                        FlowDirection.Jminus => Transmissibility(yDir, m, m),
+                        FlowDirection.Jplus => Transmissibility(yDir, m, m),
+                        FlowDirection.Kminus => Transmissibility(zDir, m, m),
+                        FlowDirection.Kplus => Transmissibility(zDir, m, m),
                         _ => 0
                     };
                     int indx1, indx2;
@@ -438,14 +485,13 @@ namespace ReservoirSimulator
                     Tw = Tr*krw0/(μw(pw_m)*Bw(pw_m));
                     Res[indx2] += Ceff * Tw * dt * Flowdir switch
                     {
-                        AquiferFlowDirection.Kminus => DP + 0.5*γw(pw_m)*Dz[m],
-                        AquiferFlowDirection.Kplus => DP - 0.5*γw(pw_m)*Dz[m],
+                        FlowDirection.Kminus => DP + 0.5*γw(pw_m)*Dz[m],
+                        FlowDirection.Kplus => DP - 0.5*γw(pw_m)*Dz[m],
                         _ => DP
                     };
                 }
 
                 //  HIGH CPU USAGE: Batched work gives cores long, uninterrupted calculations
-                
                 Parallel.For(0, cores, coreId =>
                 {
                     int start = coreId * chunkSize;
@@ -453,6 +499,7 @@ namespace ReservoirSimulator
 
                     // A single core executes this inner sequential loop at absolute maximum hardware speed
                     for (int m = start; m < end; m++)
+
                     {
                         int indx1 = 2*m, indx2 = 2*m + 1;
                         double PV = -Dx[m]*Dy[m]*Dz[m]*Φ[m]/beta;
@@ -469,14 +516,20 @@ namespace ReservoirSimulator
                         j = rem / Nx, i = rem % Nx;
 
                         // Add fluxes to the residual for this grid block from each of its 6 neighbors
-                        if (i > 0) AddFluxes(xDir, m, m-1);
-                        if (i < Lx) AddFluxes(xDir, m, m+1);
-                        if (j > 0) AddFluxes(yDir, m, m-Nx);
-                        if (j < Ly) AddFluxes(yDir, m, m+Nx);
-                        if (k > 0) AddFluxes(zDir, m, m-NxNy);
-                        if (k < Lz) AddFluxes(zDir, m, m+NxNy);
+                        if (i > 0) 
+                            AddFluxes(Xminus, m, m-1);
+                        if (i < Lx) 
+                            AddFluxes(Xplus, m, m+1);
+                        if (j > 0) 
+                            AddFluxes(Yminus, m, m-Nx);
+                        if (j < Ly) 
+                            AddFluxes(Yplus, m, m+Nx);
+                        if (k > 0)
+                            AddFluxes(Zminus, m, m-NxNy);
+                        if (k < Lz)
+                            AddFluxes(Zplus, m, m+NxNy);
                         // Add aquifer fluxes if an aquifer is present and connected to this grid block
-                        if (Aquifer != null && Aquifer.IsthereAquiferFlow(i, j, k)) 
+                        if (Aquifer != null && Aquifer.IsthereAquiferFlow(i, j, k))
                             AddAquiferFluxes(Aquifer.FlowDirection, m, Aquifer.Pa, Aquifer.Connectivity_Efficiency);
                     }
                 });
@@ -498,19 +551,21 @@ namespace ReservoirSimulator
                             {
                                 int indx1 = 2*m, indx2 = 2*m+1;
                                 ADiff po_m = xnp1[indx1], sw_m = xnp1[indx2],
-                                pw_m = po_m - Pc_I(sw_m), so_m = 1 - sw_m;
+                                pw_m = po_m - Pc_I(sw_m), so_m = 1 - sw_m,
+                                go_avg = 0.5*(γo(po_m) + γo(pwell)),
+                                gw_avg = 0.5*(γw(pw_m) + γw(pwell)),
+                                DΦo = pwell - po_m - go_avg*(Zref - Z[m]),
+                                DΦw = pwell - pw_m - gw_avg*(Zref - Z[m]);
                                 WI = well.Perforation_WI[well.Perforation_NatIndex.IndexOf(m)];
 
                                 WIo = WI*Kro(so_m)/(μo(po_m)*Bo(po_m));
-                                oil_rate = (pwell - po_m - γo(po_m)*(Zref - Z[m]))*WIo;
-
+                                oil_rate = DΦo*WIo;
                                 well.OilRate += oil_rate.Value;
                                 Res[indx1] += oil_rate*dt;
                                 Res[2*Ngrids + 2*nwell] -= oil_rate*dt;
 
                                 WIw = WI*Krw(sw_m)/(μw(pw_m)*Bw(pw_m));
-                                water_rate = (pwell - pw_m - γw(pw_m)*(Zref - Z[m]))*WIw;
-
+                                water_rate = DΦw*WIw;
                                 well.WaterRate += water_rate.Value;
                                 Res[indx2] += water_rate*dt;
                                 Res[2*Ngrids + 2*nwell] -= water_rate*dt;
@@ -522,12 +577,13 @@ namespace ReservoirSimulator
                             {
                                 int indx1 = 2*m, indx2 = 2*m+1;
                                 ADiff po_m = xnp1[indx1], sw_m = xnp1[indx2],
-                                pw_m = po_m - Pc_I(sw_m), so_m = 1 - sw_m;
+                                pw_m = po_m - Pc_I(sw_m), so_m = 1 - sw_m,
+                                gw_avg = 0.5*(γw(pw_m) + γw(pwell)),
+                                DΦw = pwell - pw_m - gw_avg*(Zref - Z[m]);
                                 WI = well.Perforation_WI[well.Perforation_NatIndex.IndexOf(m)];
 
                                 WIw = WI*krw0/(μw(pwell)*Bw(pwell));
-                                water_rate = (pwell - pw_m - γw(pwell)*(Zref - Z[m]))*WIw;
-
+                                water_rate = DΦw*WIw;
                                 well.WaterRate += water_rate.Value;
                                 Res[indx2] += water_rate*dt;
                                 Res[2*Ngrids + 2*nwell] -= water_rate*dt;
@@ -550,10 +606,10 @@ namespace ReservoirSimulator
 
             dt = 0.001;
             // Initialize historical data tracking containers for plotting and reporting
-            P = [Po_n]; S = [Sw_n]; Rate = [Qwells_n]; 
+            P = [Po_n]; S = [Sw_n]; Rate = [Qwells_n];
             Pwf = [Pwells_n]; WaterCut = [new double[Nwells]];
             Time = [0.0]; SweepEff = [0.0];
-            List<double>  Interval = [0, .. ResultTime];
+            List<double> Interval = [0, .. ResultTime];
             foreach (var well in Wells)
                 Interval.AddRange(well.ProductionProfile.Time);
             Interval = [.. Interval.Distinct().OrderBy(x => x)];
@@ -584,7 +640,9 @@ namespace ReservoirSimulator
                     int iter; bool isConverged = false;
                     for (iter = 1; iter < 10; iter++)
                     {
+                        //Upstreamlock = iter > 4;
                         // Solve the nonlinear system using Newton-Raphson method
+                        InitialGuess();
                         Residual(xs, tnp1); rnorm = b.Max(Abs);
                         double[] dx = LinSolve(a_value, a_index, a_start, b);
                         for (int v = 0; v < varNum; v++) xs[v].Value -= dx[v];
@@ -604,25 +662,26 @@ namespace ReservoirSimulator
                                            Rejected (Non-Convergence)
                                 ================================================
                                 """);
-                        GuessReset();
                         continue;
                     }
 
                     // Unpack solution values to evaluate operational constraint validations
-                    var Sol = Unpack(xs);
+                    var Sol = ExtractSolution();
                     if (Sol.maxDP > 400 || Sol.maxDS > 0.15)
                     {
+                        int j = Sol.maxDP > 400 ? Sol.i_p : Sol.i_s;
+                        double limit = Sol.maxDP > 400 ? 400 : 0.15;
+                        double change = Sol.maxDP > 400 ? Sol.maxDP : Sol.maxDS;
                         Console.ForegroundColor = ConsoleColor.Yellow;
                         Console.WriteLine($"\n[Warning] Time Step Rejected: State Change Limit Exceeded.");
                         Console.ResetColor();
-                        Console.WriteLine($"    ↳ Location       : Cell Index {Sol.j}");
-                        Console.WriteLine($"    ↳ Violation      : {(Sol.maxDP > 400 ? "ΔP" : "ΔS")} = {(Sol.maxDP > 400 ? Sol.maxDP.ToString("F4") : Sol.maxDS.ToString("F4"))} (Max Allowed: {(Sol.maxDP > 400 ? 400.ToString("F4") : 0.15.ToString("F4"))})");
-                        Console.WriteLine($"    ↳ Current State  : P = {Po_n[Sol.j]:F1} psi | Sw = {Sw_n[Sol.j]:F4}");
-                        Console.WriteLine($"    ↳ Attempted State: P = {Sol.Po[Sol.j]:F1} psi | Sw = {Sol.Sw[Sol.j]:F4}");
+                        Console.WriteLine($"    ↳ Location       : Cell Index {j}");
+                        Console.WriteLine($"    ↳ Violation      : {(Sol.maxDP > 400 ? "ΔP" : "ΔS")} = {change.ToString("F4")} (Max Allowed: {limit.ToString("F4")})");
+                        Console.WriteLine($"    ↳ Current State  : P = {Po_n[j]:F1} psi | Sw = {Sw_n[j]:F4}");
+                        Console.WriteLine($"    ↳ Attempted State: P = {Sol.Po[j]:F1} psi | Sw = {Sol.Sw[j]:F4}");
                         Console.WriteLine($"    ↳ Solver Action  : Rolling back to t = {t:F3} days.");
                         Console.WriteLine($"    ↳ Time-Step Chop : Reducing Δt from {dt:F2} to {0.5*dt:F2} days (Factor: 0.5).\n");
                         dt = 0.5*dt;
-                        GuessReset();
                         continue;
                     }
 
@@ -634,17 +693,16 @@ namespace ReservoirSimulator
                         if (Wells[n].WellType == WellType.Producer)
                         {
                             // switch to BHP control if pressure falls below minimum limits
-                            if (Wells[n].ConstraintType == ConstraintType.FlowRate &&
+                            if (Wells[n].ConstraintType == ConstraintType.LiqRate &&
                                 Pwells_n[n] < Wells[n].MinPressure)
                             {
                                 Wells[n].ConstraintType = ConstraintType.MinPressure;
-                                Console.WriteLine("""
-                                ================================================
-                                      Rejected (Minimum Pressure Violated) 
-                                ================================================
+                                Console.WriteLine($"""
+                                ===============================================================
+                                      Rejected (Minimum Pressure Violated) @ {Wells[n].Name}
+                                ===============================================================
                                 """);
                                 staterejected = true;
-                                break;
                             }
                         }
 
@@ -653,7 +711,7 @@ namespace ReservoirSimulator
                         {
 
                             // switch to BHP control if pressure exceeds fracturing limits
-                            if (Wells[n].ConstraintType == ConstraintType.FlowRate &&
+                            if (Wells[n].ConstraintType == ConstraintType.LiqRate &&
                                 Pwells_n[n] > Wells[n].MaxPressure)
                             {
                                 Wells[n].ConstraintType = ConstraintType.MaxPressure;
@@ -663,15 +721,11 @@ namespace ReservoirSimulator
                                 ================================================
                                 """);
                                 staterejected = true;
-                                break;
                             }
                         }
                     }
-                    if (staterejected)
-                    {
-                        GuessReset();
-                        continue;
-                    }
+                    if (staterejected) continue;
+                    
 
                     // Log verified parameters to performance history arrays
                     Po_n = Sol.Po; Sw_n = Sol.Sw; Pwells_n = Sol.Pwell; Qwells_n = Sol.Qwell;
@@ -695,7 +749,7 @@ namespace ReservoirSimulator
                     if (!isComplete) dt = Min(dt, L - t);
                     dt = Min(dt, 100);
                 }
-                if (history_dtmax > 0) dt = 0.5*history_dtmax;
+                if (history_dtmax > 0) dt = 0.1*history_dtmax;
             }
         }
 
@@ -850,6 +904,11 @@ namespace ReservoirSimulator
                 coords[i + 1] = coords[i] + deltas[i];
             }
             return coords;
+        }
+
+        private void ProcessGrids()
+        {
+
         }
 
     }

@@ -41,7 +41,7 @@ namespace ReservoirSimulator
         public int I { get; }
         public int J { get; }
         public int[] PerfInterval { get; }
-        public ConstraintType ConstraintType { get; set; } = ConstraintType.FlowRate;
+        public ConstraintType ConstraintType { get; set; } = ConstraintType.LiqRate;
         public WellType WellType { get; set; }
         public (List<double> Time, List<double> Rate) ProductionProfile { get; set; }
 
@@ -83,7 +83,7 @@ namespace ReservoirSimulator
         {
             return ConstraintType switch
             {
-                ConstraintType.FlowRate => Rate - ProdRate(time),
+                ConstraintType.LiqRate => Rate - ProdRate(time),
                 ConstraintType.MaxPressure => Pressure - MaxPressure,
                 ConstraintType.MinPressure => Pressure - MinPressure,
                 _ => Rate - ProdRate(time),
@@ -95,7 +95,7 @@ namespace ReservoirSimulator
             ConstraintValue.Clear();
             return ConstraintType switch
             {
-                ConstraintType.FlowRate => ConstraintValue.AddInPlace(Rate).SubtractInPlace(ProdRate(time)),
+                ConstraintType.LiqRate => ConstraintValue.AddInPlace(Rate).SubtractInPlace(ProdRate(time)),
                 ConstraintType.MaxPressure => ConstraintValue.AddInPlace(Pressure).SubtractInPlace(MaxPressure),
                 ConstraintType.MinPressure => ConstraintValue.AddInPlace(Pressure).SubtractInPlace(MinPressure),
                 _ => Rate - ProdRate(time),

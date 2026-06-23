@@ -1,4 +1,5 @@
 <Solution>
+  <Project Path="EclipseDeckReader/EclipseDeckReader.csproj" Id="7a6ce282-6cd5-41da-8ad9-63792f2b8cc0" />
   <Project Path="ReservoirSimulator/ReservoirSimulator.csproj" Id="2bb7aca7-24bd-4f8a-b854-f67a1a4596b8" />
   <Project Path="ResSim/ResSim.csproj" />
 </Solution>

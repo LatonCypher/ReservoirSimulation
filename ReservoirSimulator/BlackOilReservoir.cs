@@ -396,7 +396,7 @@ namespace ReservoirSimulator
                         if (Wells[n].WellType == WellType.Producer)
                         {
                             // switch to BHP control if pressure falls below minimum limits
-                            if (Wells[n].ConstraintType == ConstraintType.FlowRate &&
+                            if (Wells[n].ConstraintType == ConstraintType.LiqRate &&
                                 Pwells_n[n] < Wells[n].MinPressure)
                             {
                                 Wells[n].ConstraintType = ConstraintType.MinPressure;
@@ -429,7 +429,7 @@ namespace ReservoirSimulator
                         {
 
                             // switch to BHP control if pressure exceeds fracturing limits
-                            if (Wells[n].ConstraintType == ConstraintType.FlowRate &&
+                            if (Wells[n].ConstraintType == ConstraintType.LiqRate &&
                                 Pwells_n[n] > Wells[n].MaxPressure)
                             {
                                 Wells[n].ConstraintType = ConstraintType.MaxPressure;

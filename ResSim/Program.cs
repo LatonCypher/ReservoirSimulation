@@ -1,6 +1,5 @@
-﻿
-using HarfBuzzSharp;
-
+﻿using EclipseDeckReader;
+using System.Diagnostics;
 {
     //// 1. Grid Specifications (10x10x3)
     //int nx = 50, ny = 1, nz = 1;
@@ -81,41 +80,90 @@ using HarfBuzzSharp;
     //Console.WriteLine($"Simulation completed successfully without crashing in {toc():F2} seconds!");
     //reservoir2.ExportParaView("C:\\Users\\lateef.a.kareem\\Documents\\GitHub\\ReservoirSimulation\\RunTest2");
 
-   
+
     //Console.WriteLine($"Number of function calls = {reservoir1.funcall:F0}!");
     //Console.WriteLine($"Number of function calls = {reservoir2.funcall:F0}!");
+}
+
+{
+    //// 1. Define the path to your master ECLIPSE file (.DATA or .GRDECL)
+    //// If testing with the Norne deck, point it to your local file path
+    //string masterDeckPath = @"C:\Users\lateef.a.kareem\Documents\GitHub\opm-data\norne\NORNE_ATW2013.DATA";
+
+    //Console.WriteLine("==================================================");
+    //Console.WriteLine("        LAUNCHING ECLIPSE INGESTION PIPELINE     ");
+    //Console.WriteLine("==================================================");
+
+    //if (!File.Exists(masterDeckPath))
+    //{
+    //    Console.ForegroundColor = ConsoleColor.Red;
+    //    Console.WriteLine($"[Error] Could not locate file: {masterDeckPath}");
+    //    Console.ResetColor();
+    //    return;
+    //}
+
+    //// 2. Initialize your reader and track performance
+    //Stopwatch timer = Stopwatch.StartNew();
+
+    //try
+    //{
+    //    DeckReader reader = new();
+
+    //    Console.WriteLine($"Reading and parsing deck stream...");
+    //    EclipseDataDeck loadedDeck = reader.LoadDeck(masterDeckPath);
+
+    //    timer.Stop();
+
+    //    // 3. Print out the success metrics and structural logs
+    //    loadedDeck.PrintDeckSummary();
+    //    Console.WriteLine($"\n✓ Core parsing engine finished in: {timer.ElapsedMilliseconds} ms");
+
+    //    // 4. Verification Check: Confirm arrays aren't empty before handing to math loops
+    //    loadedDeck.VerifyArrayIntegrity();
+    //}
+    //catch (Exception ex)
+    //{
+    //    Console.ForegroundColor = ConsoleColor.Red;
+    //    Console.WriteLine($"\n[Critical Ingestion Failure]: {ex.Message}");
+    //    if (ex.InnerException != null)
+    //        Console.WriteLine($" ↳ Detail: {ex.InnerException.Message}");
+    //    Console.ResetColor();
+    //}
+
+    //Console.WriteLine("\nPipeline idle. Press any key to close context window...");
+    //Console.ReadKey();
 }
 
 {   // Eclipse Style Input
 
     // DIMENS
-    int nx = 20, ny = 20, nz = 5;
+    int nx = 50, ny = 50, nz = 5;
 
     // GRID
-    double[] dx = Repmat(250, nx*ny*nz), dy = Repmat(250, nx*ny*nz), 
-        dz = Repmat(30, nx*ny*nz), zTop = Repmat(0, nx*ny);
-    double[] phi = Repmat(0.2, nx * ny * nz), 
-        perm = Repmat(600, nx * ny * nz);
+    double[] dx = Repmat(40, nx*ny*nz), dy = Repmat(40, nx*ny*nz),
+        dz = Repmat(10, nx*ny*nz), zTop = Repmat(0, nx*ny);
+    double[] phi = Repmat(0.2, nx * ny * nz),
+        perm = Repmat(1000, nx * ny * nz);
     double mult_z = 0.2;
 
     // PVTW
-    double pref_w = 6000, bw0 = 1, cw = 2e-7, μw0 = 0.3, bw = 1e-10;
+    double pref_w = 6000, bw0 = 1, cw = 8e-7, μw0 = 0.3, bw = 1e-10;
 
     // PVDO (Pressure, FVF, Muo) 
     Matrix pvdo = new double[,]
     {
-        { 14,       1.001,   0.999999 },
-        { 100,      1.000,   1.000000 },
-        { 1000,     0.999,   1.000001 },
-        { 2000,     0.998,   1.000002 },
-        { 3000,     0.997,   1.000003 },
-        { 4000,     0.996,   1.000004 },
-        { 5000,     0.995,   1.000005 },
-        { 6000,     0.994,   1.000006 },
-        { 7000,     0.993,   1.000007 },
-        { 8000,     0.992,   1.000008 },
-        { 9000,     0.991,   1.000009 },
-        { 10000,    0.990,   1.000010 }
+        { 14,       1.0001,   0.9999 },
+        { 100,      1.0000,   1.0000 },
+        { 1000,     0.9999,   1.0001 },
+        { 2000,     0.9998,   1.0002 },
+        { 3000,     0.9997,   1.0003 },
+        { 4000,     0.9996,   1.0004 },
+        { 5000,     0.9995,   1.0005 },
+        { 6000,     0.9994,   1.0006 },
+        { 7000,     0.9993,   1.0007 },
+        { 8000,     0.9992,   1.0008 },
+        { 9000,     0.9991,   1.0009 },
+        { 10000,    0.9990,   1.0010 }
     };
 
     // ROCK
@@ -143,19 +191,25 @@ using HarfBuzzSharp;
     double ρo0 = 43.68, ρw0 = 62.43;
 
     // EQUIL     
-    double datum = 0, pdatun = 3000, z_woc = 150, pcwoc = 0;
+    double datum = 0, pdatun = 3000, z_woc = 40, pcwoc = 0;
 
     // WELL
     List<Well> wells =
     [
         // Injector at Block 0
-        new Well(WellType.Producer, "WP3051X", 0.5, 0, 1500, 6000, 19, 0, [0,2], [0, 500, 1000], [200, 400, 800]),
+        new Well(WellType.Producer, "WP3051X", 0.5, 0, 1500, 9000, 4, 4, [0,3], [0, 100, 200, 300], [0, 300, 500, 700]),
         // Producer at Block 9
-        new Well(WellType.Injector, "WP5032X", 0.5, 0, 1500, 6000, 0, 19, [3,4], [0, 500, 1000], [200, 400, 1000])
+        new Well(WellType.Injector, "WP5032W", 0.5, 0, 1500, 9000, 0, 0, [4,4], [0, 100, 200, 300], [0,  50, 100, 150]),
+        // Producer at Block 9
+        new Well(WellType.Injector, "WP5032X", 0.5, 0, 1500, 9000, 0, 9, [4,4], [0, 100, 200, 300], [0,  50, 100, 150]),
+        // Producer at Block 9
+        new Well(WellType.Injector, "WP5032Y", 0.5, 0, 1500, 9000, 9, 9, [4,4], [0, 100, 200, 300], [0,  50, 100, 150]),
+        // Producer at Block 9
+        new Well(WellType.Injector, "WP5032Z", 0.5, 0, 1500, 9000, 9, 0, [4,4], [0, 100, 200, 300], [0,  50, 100, 150])
     ];
 
     //--AQUID              I1   I2    J1   J2     K1    K2                   FACE          CNCT_EFF
-    Aquifer Aquifer = new([0, nx-1], [0, ny-1], [nz-1, nz-1], AquiferFlowDirection.Kplus, 3050, 0.5);
+    Aquifer Aquifer = new([0, nx-1], [0, ny-1], [nz-1, nz-1], FlowDirection.Kplus, 3050, 0);
 
     var reservoir = new OilWaterReservoir(
             // DIMENS
@@ -189,13 +243,16 @@ using HarfBuzzSharp;
             Aquifer
     );
     reservoir.Initialize();
-    double[] resultTime = Linspace(0, 3300, 2);
+    double[] resultTime = Linspace(0, 10000, 2);
 
 
     tic();
     Console.WriteLine("Executing Core Simulation Test Loop...");
     reservoir.Simulate2Phase(resultTime, wells);
     Console.WriteLine($"Simulation completed successfully without crashing in {toc():F2} seconds!");
+
+
+    reservoir.ExportParaView("C:\\Users\\lateef.a.kareem\\Documents\\GitHub\\ReservoirSimulation\\RunTest2");
 }
 
 

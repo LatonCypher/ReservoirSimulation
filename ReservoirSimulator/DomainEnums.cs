@@ -13,7 +13,10 @@
     {
         MaxPressure,
         MinPressure,
-        FlowRate
+        LiqRate,
+        OilRate,
+        WaterRate,
+        GasRate
     }
 
     public enum WellType
@@ -25,7 +28,10 @@
     public enum Phase
     {
         Oil,
-        Water
+        Water,
+        Gas,
+        DisGas,
+        VapOil
     }
 
     public enum Direction
@@ -35,13 +41,13 @@
         Z
     }
 
-    public enum AquiferFlowDirection
+    public enum FlowDirection
     {
-        Iplus,
         Iminus,
-        Jplus,
+        Iplus,
         Jminus,
-        Kplus,
-        Kminus
+        Jplus,
+        Kminus,
+        Kplus
     }
 }
