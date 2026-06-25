@@ -134,17 +134,67 @@ using System.Diagnostics;
     //Console.ReadKey();
 }
 
+static int[] ReadActnumFile(string filePath)
+{
+    var intList = new List<int>(8405); // Presize with your expected 41x41x5 grid dimension
+
+    // Read line-by-line to avoid loading giant buffers all at once
+    foreach (string line in File.ReadLines(filePath))
+    {
+        if (string.IsNullOrWhiteSpace(line)) continue;
+
+        ReadOnlySpan<char> span = line.AsSpan().Trim();
+
+        // 1. Strip out the header metadata if present
+        if (span.StartsWith("["))
+        {
+            int closeBracketIdx = span.IndexOf(']');
+            if (closeBracketIdx != -1)
+            {
+                span = span.Slice(closeBracketIdx + 1).Trim();
+            }
+        }
+
+        // 2. Extract elements separated by spaces
+        while (span.Length > 0)
+        {
+            int spaceIdx = span.IndexOf(' ');
+
+            if (spaceIdx == -1)
+            {
+                // Last element on the line
+                if (int.TryParse(span, out int lastVal))
+                {
+                    intList.Add(lastVal);
+                }
+                break;
+            }
+
+            ReadOnlySpan<char> token = span.Slice(0, spaceIdx);
+            if (int.TryParse(token, out int val))
+            {
+                intList.Add(val);
+            }
+
+            // Advance past the processed token and continuous spaces
+            span = span.Slice(spaceIdx + 1).TrimStart();
+        }
+    }
+
+    return intList.ToArray();
+}
 {   // Eclipse Style Input
 
     // DIMENS
-    int nx = 50, ny = 50, nz = 5;
+    int nx = 46, ny = 112, nz = 5;
 
     // GRID
-    double[] dx = Repmat(40, nx*ny*nz), dy = Repmat(40, nx*ny*nz),
+    double[] dx = Repmat(25, nx*ny*nz), dy = Repmat(25, nx*ny*nz),
         dz = Repmat(10, nx*ny*nz), zTop = Repmat(0, nx*ny);
     double[] phi = Repmat(0.2, nx * ny * nz),
         perm = Repmat(1000, nx * ny * nz);
     double mult_z = 0.2;
+    int[] Actnum = ReadActnumFile("C:\\Users\\lateef.a.kareem\\Documents\\GitHub\\ReservoirSimulation\\ResSim\\actnum.txt");// read(int)
 
     // PVTW
     double pref_w = 6000, bw0 = 1, cw = 8e-7, μw0 = 0.3, bw = 1e-10;
@@ -187,25 +237,23 @@ using System.Diagnostics;
         { 0.800,  1.0000,  0.0000,  0.0 }
     };
 
+    //
+
     // DENSITY (Oil density, water density) 
     double ρo0 = 43.68, ρw0 = 62.43;
 
     // EQUIL     
-    double datum = 0, pdatun = 3000, z_woc = 40, pcwoc = 0;
+    double datum = 0, pdatun = 3000, z_woc = 50, pcwoc = 0;
 
     // WELL
     List<Well> wells =
     [
         // Injector at Block 0
-        new Well(WellType.Producer, "WP3051X", 0.5, 0, 1500, 9000, 4, 4, [0,3], [0, 100, 200, 300], [0, 300, 500, 700]),
+        new Well(WellType.Producer, "WP1", 0.5, 0, 1500, 9000, 36, 87, [0,0], [0, 100, 200, 300, 400], [0, 300, 600, 900, 1200]),
         // Producer at Block 9
-        new Well(WellType.Injector, "WP5032W", 0.5, 0, 1500, 9000, 0, 0, [4,4], [0, 100, 200, 300], [0,  50, 100, 150]),
+        new Well(WellType.Producer, "WP2", 0.5, 0, 1500, 9000, 12, 87, [0,0], [0, 100, 200, 300, 400], [0, 300, 600, 900, 1200]),
         // Producer at Block 9
-        new Well(WellType.Injector, "WP5032X", 0.5, 0, 1500, 9000, 0, 9, [4,4], [0, 100, 200, 300], [0,  50, 100, 150]),
-        // Producer at Block 9
-        new Well(WellType.Injector, "WP5032Y", 0.5, 0, 1500, 9000, 9, 9, [4,4], [0, 100, 200, 300], [0,  50, 100, 150]),
-        // Producer at Block 9
-        new Well(WellType.Injector, "WP5032Z", 0.5, 0, 1500, 9000, 9, 0, [4,4], [0, 100, 200, 300], [0,  50, 100, 150])
+        new Well(WellType.Injector, "WI1", 0.5, 0, 1500, 9000, 17, 15, [4,4], [0, 100, 200, 300, 400], [0, 700, 1400, 2100, 2800]),
     ];
 
     //--AQUID              I1   I2    J1   J2     K1    K2                   FACE          CNCT_EFF
@@ -240,7 +288,10 @@ using System.Diagnostics;
             wells,
 
             // AQUIFER
-            Aquifer
+            Aquifer,
+
+            // ACTNUM
+            Actnum
     );
     reservoir.Initialize();
     double[] resultTime = Linspace(0, 10000, 2);
@@ -252,7 +303,8 @@ using System.Diagnostics;
     Console.WriteLine($"Simulation completed successfully without crashing in {toc():F2} seconds!");
 
 
-    reservoir.ExportParaView("C:\\Users\\lateef.a.kareem\\Documents\\GitHub\\ReservoirSimulation\\RunTest2");
+    reservoir.ExportParaView("C:\\Users\\lateef.a.kareem\\Documents\\GitHub\\ReservoirSimulation\\RunTest1");
+    reservoir.ExportWells("C:\\Users\\lateef.a.kareem\\Documents\\GitHub\\ReservoirSimulation\\RunTest1");
 }
 
 

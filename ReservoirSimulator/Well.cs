@@ -101,5 +101,14 @@ namespace ReservoirSimulator
                 _ => Rate - ProdRate(time),
             };
         }
+
+        internal double[][] GetTrajectoryCoordinates(double[] xCoords, double[] yCoords, double[] zCoords)
+        {
+            double x1 = xCoords[I] + 0.5*(xCoords[I+1] - xCoords[I]), x2 = x1;
+            double y1 = yCoords[J] + 0.5*(yCoords[J+1] - yCoords[J]), y2 = y1;
+            double z1 = zCoords[0] - 100, z2 = zCoords[PerfInterval[1]+1];
+            double[][] coordinates = [[x1, y1, z1], [x2, y2, z2]];
+            return coordinates;
+        }
     }
 }

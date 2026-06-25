@@ -47,10 +47,12 @@ namespace ReservoirSimulator
         (double[] Po, double[] Sw, double[] Pwell, double[] Qwell, double maxDP, double maxDS, int i_p, int i_s) ExtractSolution()
         {
             int indx = 0, i_p = 0, i_s = 0; double maxDp = 0, maxDs = 0;
-            double[] Po = new double[Ngrids], Sw = new double[Ngrids],
+            double[] Po = [.. Enumerable.Repeat(double.NaN, Ngrids)],
+                     Sw = [.. Enumerable.Repeat(double.NaN, Ngrids)],
                      Pwell = new double[Nwells], Qwell = new double[Nwells];
             for (int i = 0; i < Ngrids; i++)
             {
+                if (Actnum[i] == 0) { indx += 2; continue; }
                 Po[i] = xs[indx++].Value; // Matches Po index
                 Sw[i] = xs[indx++].Value; // Matches Sw index
                 if (Abs(Po[i] - Po_n[i]) > maxDp)
@@ -69,10 +71,10 @@ namespace ReservoirSimulator
         void InitialGuess()
         {
             int indx = 0, n = Time.Count-1;
-
             double omega = n < 2 ? 0 : dt/(Time[n]-Time[n-1]);
             for (int i = 0; i < Ngrids; i++)
             {
+                if (Actnum[i] == 0) { indx += 2; continue; }
                 xs[indx++].Value = Po_n[i];                          // Matches Po index
                 if (n >= 2) xs[indx] += omega*(Po_n[i] - P[n-1][i]); // Extrapolation
                 xs[indx++].Value = Sw_n[i];                          // Matches Sw index
@@ -98,6 +100,8 @@ namespace ReservoirSimulator
         Aquifer Aquifer;
         double[,] Trans;
         bool[,] Water_Upstream, Oil_Upstream;
+        int[] Actnum;
+        List<int> Columns2Delete = [];
         public OilWaterReservoir(
             // DIMENS
             int _nx, int _ny, int _nz,
@@ -128,7 +132,10 @@ namespace ReservoirSimulator
             List<Well> _wells,
 
             // AQUIFER
-            Aquifer _aquifer = null)
+            Aquifer _aquifer = null,
+
+            // ACTNUM
+            int[] _actnum = null)
         {
             ADiff.capacity = 16;
             Nx = _nx; Ny = _ny; Nz = _nz; NxNy = Nx*Ny; Ngrids = Nx*Ny*Nz;
@@ -208,6 +215,7 @@ namespace ReservoirSimulator
             }
             Wells = _wells; Nwells = Wells.Count; varNum = 2*Ngrids + 2*Nwells;
             Aquifer = _aquifer;
+            Actnum = _actnum is not null? _actnum:[.. Enumerable.Repeat(1, Ngrids)];
         }
         public OilWaterReservoir(int _nx, int _ny, int _nz,
             double[] _perm, double[] _phi, double[] _dx, double[] _dy,
@@ -216,7 +224,7 @@ namespace ReservoirSimulator
             double _bo0, double _bw0, double _μo0, double _μw0, double _γo0,
             double _γw0, double _krw0, double _kro0, double _co, double _cw,
             double _cr, double _bo, double _bw, double _nw, double _no,
-            double _pb, double _pref, List<Well> _wells, Aquifer _aquifer = null)
+            double _pb, double _pref, List<Well> _wells, Aquifer _aquifer = null, int[] _actnum = null)
         {
             ADiff.capacity = 16;
             Kx = _perm; Ky = _perm; Kz = [.. _perm.Select(k => k*_mult_z)];
@@ -229,6 +237,7 @@ namespace ReservoirSimulator
             Pw_woc = _pw_woc; Po_woc = Pw_woc + Pe; Z_woc = _z_woc;
             Wells = _wells; Nwells = Wells.Count; varNum = 2*Ngrids + 2*Nwells;
             Aquifer = _aquifer;
+            Actnum = _actnum is not null ? _actnum : [.. Enumerable.Repeat(1, Ngrids)];
 
 
             Sws = Sw => (Sw - Sw_r)/(1 - Sw_r);
@@ -257,9 +266,12 @@ namespace ReservoirSimulator
             funcall = 0;
 
             // 2. Initialize the spatial grid blocks
-            Pw_n = new double[Ngrids]; Sw_n = new double[Ngrids];
-            Po_n = new double[Ngrids]; So_n = new double[Ngrids];
-            ErSo_Bo_n = new double[Ngrids]; ErSw_Bw_n = new double[Ngrids];
+            Pw_n = [..Enumerable.Repeat(double.NaN, Ngrids)]; 
+            Sw_n = [.. Enumerable.Repeat(double.NaN, Ngrids)];
+            Po_n = [.. Enumerable.Repeat(double.NaN, Ngrids)]; 
+            So_n = [.. Enumerable.Repeat(double.NaN, Ngrids)];
+            ErSo_Bo_n = [.. Enumerable.Repeat(double.NaN, Ngrids)]; 
+            ErSw_Bw_n = [.. Enumerable.Repeat(double.NaN, Ngrids)];
             ErSo_Bo_np1 = new ADiff[Ngrids]; ErSw_Bw_np1 = new ADiff[Ngrids];
             Res = new ADiff[varNum]; xs = new ADiff[varNum];
 
@@ -267,6 +279,13 @@ namespace ReservoirSimulator
             {
                 for (int i = 0; i < Ngrids; i++)
                 {
+                    if (Actnum[i] == 0)
+                    {
+                        Columns2Delete.Add(2*i);
+                        Columns2Delete.Add(2*i + 1);
+                        continue;
+                    }
+
                     if (Z[i] < Z_woc)
                     {
                         double p = Po_woc + γo(Po_woc).Value * (Z[i] - Z_woc);
@@ -299,6 +318,13 @@ namespace ReservoirSimulator
 
                 for (int i = 0; i < Ngrids; i++)
                 {
+                    if (Actnum[i] == 0)
+                    {
+                        Columns2Delete.Add(2*i);
+                        Columns2Delete.Add(2*i + 1);
+                        continue;
+                    }
+
                     Pw_n[i] = Pw_woc + γw(Pw_woc).Value * (Z[i] - Z_woc);
                     Po_n[i] = Po_woc + γo(Po_woc).Value * (Z[i] - Z_woc);
                     double pc = Po_n[i] - Pw_n[i];
@@ -348,34 +374,43 @@ namespace ReservoirSimulator
             }
         }
 
-        public static (List<int>, List<int>, List<double>) DeleteCol(List<int> a_start,
-            List<int> a_index, List<double> a_value, List<int> index2delete)
+        public static (List<int> start, List<int> index, List<double> value) DeleteCol(
+    List<int> a_start, List<int> a_index, List<double> a_value, List<int> index2delete)
         {
-            if (index2delete.Count == 0)
+            if (index2delete == null || index2delete.Count == 0)
                 return (a_start, a_index, a_value);
 
-            // 1. Build a global column remapping array (O(ColCount))
+            // 1. Convert deletion targets to a HashSet for O(1) lookups
+            HashSet<int> deleteSet = [..index2delete];
+
+            // 2. Build a global column remapping array safely
             int maxCol = a_index.Count > 0 ? a_index.Max() + 1 : 0;
             int[] colMap = new int[maxCol];
             int currentNewCol = 0;
-            for (int c = 0; c<maxCol; c++)
-                colMap[c] = index2delete.Contains(c) ? -1 : currentNewCol++;
 
-            // 2. Allocate clean, high-performance tracking structures
-            List<int> new_start = [0], new_index = [];
-            List<double> new_value = [];
+            for (int c = 0; c < maxCol; c++)
+            {
+                colMap[c] = deleteSet.Contains(c) ? -1 : currentNewCol++;
+            }
 
-            // 3. Process the entire matrix in a single linear sweep (O(NNZ))
+            // 3. Allocate clean tracking structures with estimated capacity bounds
+            List<int> new_start = new(a_start.Count) {0};
+            List<int> new_index = new(a_index.Count);
+            List<double> new_value = new(a_value.Count);
+
+            // 4. Process the entire matrix in a single linear sweep
             int rowCount = a_start.Count - 1;
-            for (int i = 0; i<rowCount; i++)
+            for (int i = 0; i < rowCount; i++)
             {
                 int rowStart = a_start[i];
                 int rowEnd = a_start[i + 1];
 
-                for (int j = rowStart; j<rowEnd; j++)
+                for (int j = rowStart; j < rowEnd; j++)
                 {
                     int globalCol = a_index[j];
-                    if (colMap[globalCol] != -1) // If it's a keeper, copy directly
+
+                    // Check boundary to guard against tracking arrays larger than structural coordinates
+                    if (globalCol >= 0 && globalCol < maxCol && colMap[globalCol] != -1)
                     {
                         new_index.Add(colMap[globalCol]);
                         new_value.Add(a_value[j]);
@@ -385,8 +420,8 @@ namespace ReservoirSimulator
                 new_start.Add(new_index.Count);
             }
 
-            // 4. Update your master collections via O(1) reference swapping
-            return (a_start, a_index, a_value);
+            // FIX: Return the newly calculated compressed collections
+            return (new_start, new_index, new_value);
         }
 
         public void Simulate2Phase(double[] ResultTime, List<Well> Wells)
@@ -438,6 +473,7 @@ namespace ReservoirSimulator
 
                 void AddFluxes(FlowDirection Flowdir, int m, int n)
                 {
+                    if (Actnum[n] == 0) return;
                     ADiff Po_up, Pw_up, So_up, Sw_up, Tw, To;
                     double Tr = Trans[m, (int)Flowdir];
                     int indx1, indx2;
@@ -499,8 +535,8 @@ namespace ReservoirSimulator
 
                     // A single core executes this inner sequential loop at absolute maximum hardware speed
                     for (int m = start; m < end; m++)
-
                     {
+                        if (Actnum[m] == 0) continue;
                         int indx1 = 2*m, indx2 = 2*m + 1;
                         double PV = -Dx[m]*Dy[m]*Dz[m]*Φ[m]/beta;
                         ADiff po_m = xnp1[2*m], sw_m = xnp1[2*m+1],
@@ -516,13 +552,13 @@ namespace ReservoirSimulator
                         j = rem / Nx, i = rem % Nx;
 
                         // Add fluxes to the residual for this grid block from each of its 6 neighbors
-                        if (i > 0) 
+                        if (i > 0)
                             AddFluxes(Xminus, m, m-1);
-                        if (i < Lx) 
+                        if (i < Lx)
                             AddFluxes(Xplus, m, m+1);
-                        if (j > 0) 
+                        if (j > 0)
                             AddFluxes(Yminus, m, m-Nx);
-                        if (j < Ly) 
+                        if (j < Ly)
                             AddFluxes(Yplus, m, m+Nx);
                         if (k > 0)
                             AddFluxes(Zminus, m, m-NxNy);
@@ -594,7 +630,7 @@ namespace ReservoirSimulator
                 b.Clear(); a_value.Clear();
                 a_index.Clear(); a_start.Clear();
                 a_start.Add(0);
-                foreach (var res in Res)
+                foreach (var res in Res.Where(r=> r is not null))
                 {
                     b.Add(res.Value);
                     var sdic = res.Derivatives.OrderBy(kvp => kvp.Key);
@@ -602,6 +638,8 @@ namespace ReservoirSimulator
                     a_index.AddRange(sdic.Select(kvp => kvp.Key));
                     a_start.Add(a_value.Count);
                 }
+                if(Columns2Delete.Count > 0)
+                    (a_start, a_index, a_value) = DeleteCol(a_start, a_index, a_value, Columns2Delete);
             }
 
             dt = 0.001;
@@ -614,6 +652,8 @@ namespace ReservoirSimulator
                 Interval.AddRange(well.ProductionProfile.Time);
             Interval = [.. Interval.Distinct().OrderBy(x => x)];
             Console.WriteLine($"""
+                    Total Grids = {Ngrids}, 
+                    Active Grids = {Ngrids - Columns2Delete.Count/2}
                     ======================================================================
                                             Starting simulation
                     """);
@@ -628,10 +668,14 @@ namespace ReservoirSimulator
                 {
                     staterejected = false;
                     tnp1 = t + dt;
+                    InitialGuess();
 
                     // Call the Newton-Raphson nonlinear solver to
                     // find the next state solution
                     Console.WriteLine($"""
+
+
+
                     Time: 
                     {tnp1:E4} days
                         iter  |   Residual Norm  
@@ -642,15 +686,21 @@ namespace ReservoirSimulator
                     {
                         //Upstreamlock = iter > 4;
                         // Solve the nonlinear system using Newton-Raphson method
-                        InitialGuess();
                         Residual(xs, tnp1); rnorm = b.Max(Abs);
                         double[] dx = LinSolve(a_value, a_index, a_start, b);
-                        for (int v = 0; v < varNum; v++) xs[v].Value -= dx[v];
+
+                        int activecount = 0;
+                        for (int v = 0; v < 2*Ngrids; v++)
+                            if (Actnum[v/2] == 1) 
+                                xs[v].Value -= dx[activecount++];
+
+                        for (int v = 2*Ngrids; v < varNum; v++)
+                            xs[v].Value -= dx[activecount++];
+                        
                         Console.WriteLine($"  {iter,4}    |    {rnorm:E4}");
                         isConverged = rnorm < 1e-6;
                         if (isConverged) break;
                     }
-                    Console.WriteLine("\n\n\n\n");
 
                     // Check convergence. If non-converged,
                     // chop the time step (time-step cuts) and retry.
@@ -735,8 +785,11 @@ namespace ReservoirSimulator
                     SweepEff.Add((Sw_n.Sum() - S[0].Sum())*100/(Ngrids - S[0].Sum()));
                     for (int m = 0; m < Ngrids; m++)
                     {
-                        ErSo_Bo_n[m] = ErSo_Bo_np1[m].Value;
-                        ErSw_Bw_n[m] = ErSw_Bw_np1[m].Value;
+                        if (Actnum[m] == 1)
+                        {
+                            ErSo_Bo_n[m] = ErSo_Bo_np1[m].Value;
+                            ErSw_Bw_n[m] = ErSw_Bw_np1[m].Value;
+                        }
                     }
 
                     // Adaptive Time-Stepping Logic:
@@ -891,6 +944,16 @@ namespace ReservoirSimulator
             File.WriteAllText(Path.Combine(outputDirectory, $"{caseName}.pvd"), pvdSb.ToString());
         }
 
+        public void ExportWells(string outputDirectory)
+        {
+            Directory.CreateDirectory(outputDirectory);
+            foreach (var well in Wells)
+            {
+                double[][] Trajectory = well.GetTrajectoryCoordinates(xCoords, yCoords, zCoords);
+                ExportWellAsVtk(Path.Combine(outputDirectory, $"{well.Name}.vtk"), well.Name, Trajectory);
+            }
+        }
+
         /// <summary>
         /// Computes cumulative edge locations from cell delta sizes.
         /// Length of returning array is cell count + 1.
@@ -906,9 +969,44 @@ namespace ReservoirSimulator
             return coords;
         }
 
-        private void ProcessGrids()
+        public void ExportWellAsVtk(string outputPath, string wellName, double[][] trajectories)
         {
+            // trajectories array expected shape: [numPoints][3] -> X, Y, Z coordinates
+            int numPoints = trajectories.Length;
 
+            using StreamWriter writer = new(outputPath, false, Encoding.ASCII);
+
+            // 1. Write standard VTK Polydata Header
+            writer.WriteLine("# vtk DataFile Version 3.0");
+            writer.WriteLine($"Well Path: {wellName}");
+            writer.WriteLine("ASCII");
+            writer.WriteLine("DATASET POLYDATA");
+
+            // 2. Write Geometry Nodes (Points)
+            writer.WriteLine($"POINTS {numPoints} double");
+            for (int i = 0; i < numPoints; i++)
+            {
+                writer.WriteLine($"{trajectories[i][0]:F2} {trajectories[i][1]:F2} {trajectories[i][2]:F2}");
+            }
+            writer.WriteLine();
+
+            // 3. Topology: Link the points into a single continuous wireframe string
+            // Format: LINES [NumberOfLines] [TotalIntegerCountInBlock]
+            // Total count = NumberOfLines + total number of indices mapped
+            writer.WriteLine($"LINES 1 {numPoints + 1}");
+            writer.Write($"{numPoints} ");
+            for (int i = 0; i < numPoints; i++)
+            {
+                writer.Write($"{i} ");
+            }
+            writer.WriteLine();
+            writer.WriteLine();
+
+            // 4. Optional Metadata Attributions (Coloring / Labeling in ParaView)
+            writer.WriteLine($"CELL_DATA 1");
+            writer.WriteLine("FIELD FieldData 1");
+            writer.WriteLine($"WellID 1 {wellName.Length} string");
+            writer.WriteLine(wellName);
         }
 
     }
