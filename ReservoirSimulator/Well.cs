@@ -10,23 +10,32 @@ namespace ReservoirSimulator
         public double[] Perforation_WI { get { return productivity_Index; } }
         public double MinPressure { get; }
         public double MaxPressure { get; }
-        public double ProdRate(double time)
+        public double ComputeRate(double time)
         {
-            while (nextindex < ProductionProfile.Time.Count && ProductionProfile.Time[nextindex] < time)
-                (lastindex, nextindex) = (nextindex, nextindex + 1);
-            double rate = ProductionProfile.Rate[lastindex];
-            switch (WellType)
+            var (Time, Rate)= ConstraintType switch
             {
-                case WellType.Producer:
-                    return -Abs(rate);
-                case WellType.Injector:
-                    return Abs(rate);
-                default:
-                    return 0;
-            }
+                ConstraintType.LiqRate => LiqRateProfile,
+                ConstraintType.OilRate => OilRateProfile,
+                ConstraintType.WaterRate => WaterRateProfile,
+                ConstraintType.GasRate => GasRateProfile,
+                ConstraintType.Rate => RateProfile,
+                _ => throw new NotImplementedException()
+            };
+
+            while (nextindex < Time.Count && Time[nextindex] < time)
+                (lastindex, nextindex) = (nextindex, nextindex + 1);
+            double rate = Rate[lastindex];
+            return WellType switch
+            {
+                WellType.Producer => -Abs(rate),
+                WellType.Injector => Abs(rate),
+                _ => 0,
+            };
         }
         public double OilRate { get; set; }
         public double WaterRate { get; set; }
+        public double LiqRate { get { return OilRate + WaterRate; } }
+        public double GasRate { get; set; }
         public double WaterCut
         {
             get
@@ -43,13 +52,19 @@ namespace ReservoirSimulator
         public int[] PerfInterval { get; }
         public ConstraintType ConstraintType { get; set; } = ConstraintType.LiqRate;
         public WellType WellType { get; set; }
-        public (List<double> Time, List<double> Rate) ProductionProfile { get; set; }
+        public (List<double> Time, List<double> Rate) LiqRateProfile { get; set; }
+        public (List<double> Time, List<double> Rate) RateProfile { get; set; }
+        public (List<double> Time, List<double> Rate) OilRateProfile { get; set; }
+        public (List<double> Time, List<double> Rate) WaterRateProfile { get; set; }
+        public (List<double> Time, List<double> Rate) GasRateProfile { get; set; }
+
 
         int[] perforation_NatIndex;
         double[] productivity_Index;
 
         public Well(WellType welltype, string name, double radius, double skin, double minPressure, double maxPressure,
-            int i, int j, int[] perfInterval, List<double> time, List<double> rate)
+            int i, int j, int[] perfInterval, List<double> time, List<double> orate = null, List<double> wrate = null, 
+            List<double> grate = null, List<double> lrate = null, List<double> rate = null)
         {
             WellType = welltype;
             Name = name;
@@ -59,7 +74,16 @@ namespace ReservoirSimulator
             MaxPressure = maxPressure;
             I = i; J = j;
             PerfInterval = perfInterval;
-            ProductionProfile = (Time: time, Rate: rate);
+            if (lrate is not null)
+            { LiqRateProfile = (Time: time, Rate: lrate); ConstraintType = ConstraintType.LiqRate; }
+            if (orate is not null)
+            { OilRateProfile = (Time: time, Rate: orate); ConstraintType = ConstraintType.OilRate; }
+            if (wrate is not null)
+            { WaterRateProfile = (Time: time, Rate: wrate); ConstraintType = ConstraintType.WaterRate; }
+            if (grate is not null)
+            { GasRateProfile = (Time: time, Rate: grate); ConstraintType = ConstraintType.GasRate; }
+            if (rate is not null)
+            { RateProfile = (Time: time, Rate: rate); ConstraintType = ConstraintType.Rate; }
         }
 
         internal void ComputeNaturalIndex(int Nx, int Ny)
@@ -79,26 +103,34 @@ namespace ReservoirSimulator
                 productivity_Index[i++] = alpha_well*Sqrt(Kx[m]*Ky[m])*Dz[m]/(Log(re/Radius) + Skin);
             }
         }
-        internal ADiff Constraint(double time, ADiff Pressure, ADiff Rate )
+        internal ADiff Constraint(double time, ADiff Pressure)
         {
             return ConstraintType switch
             {
-                ConstraintType.LiqRate => Rate - ProdRate(time),
+                ConstraintType.LiqRate => LiqRate - ComputeRate(time),
+                ConstraintType.OilRate => OilRate - ComputeRate(time),
+                ConstraintType.WaterRate => WaterRate - ComputeRate(time),
+                ConstraintType.GasRate => GasRate - ComputeRate(time),
+                ConstraintType.Rate => WaterRate - ComputeRate(time),
                 ConstraintType.MaxPressure => Pressure - MaxPressure,
                 ConstraintType.MinPressure => Pressure - MinPressure,
-                _ => Rate - ProdRate(time),
+                _ => 0,
             };
         }
 
-        internal ADiff Constraint(double time, ADiff Pressure, ADiff Rate, ADiff ConstraintValue)
+        internal ADiff Constraint(double time, ADiff Pressure, ADiff ConstraintValue)
         {
             ConstraintValue.Clear();
             return ConstraintType switch
             {
-                ConstraintType.LiqRate => ConstraintValue.AddInPlace(Rate).SubtractInPlace(ProdRate(time)),
-                ConstraintType.MaxPressure => ConstraintValue.AddInPlace(Pressure).SubtractInPlace(MaxPressure),
-                ConstraintType.MinPressure => ConstraintValue.AddInPlace(Pressure).SubtractInPlace(MinPressure),
-                _ => Rate - ProdRate(time),
+                ConstraintType.LiqRate => ConstraintValue.CopyFrom(LiqRate).SubtractInPlace(ComputeRate(time)),
+                ConstraintType.OilRate => ConstraintValue.CopyFrom(OilRate).SubtractInPlace(ComputeRate(time)),
+                ConstraintType.WaterRate => ConstraintValue.CopyFrom(WaterRate).SubtractInPlace(ComputeRate(time)),
+                ConstraintType.GasRate => ConstraintValue.CopyFrom(GasRate).SubtractInPlace(ComputeRate(time)),
+                ConstraintType.Rate => ConstraintValue.CopyFrom(WaterRate).SubtractInPlace(ComputeRate(time)),
+                ConstraintType.MaxPressure => ConstraintValue.CopyFrom(Pressure).SubtractInPlace(MaxPressure),
+                ConstraintType.MinPressure => ConstraintValue.CopyFrom(Pressure).SubtractInPlace(MinPressure),
+                _ => ConstraintValue.Clear(),
             };
         }
 

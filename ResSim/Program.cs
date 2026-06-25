@@ -193,7 +193,7 @@ static int[] ReadActnumFile(string filePath)
         dz = Repmat(10, nx*ny*nz), zTop = Repmat(0, nx*ny);
     double[] phi = Repmat(0.2, nx * ny * nz),
         perm = Repmat(1000, nx * ny * nz);
-    double mult_z = 0.2;
+    double mult_z = 0.5;
     int[] Actnum = ReadActnumFile("C:\\Users\\lateef.a.kareem\\Documents\\GitHub\\ReservoirSimulation\\ResSim\\actnum.txt");// read(int)
 
     // PVTW
@@ -243,17 +243,17 @@ static int[] ReadActnumFile(string filePath)
     double ρo0 = 43.68, ρw0 = 62.43;
 
     // EQUIL     
-    double datum = 0, pdatun = 3000, z_woc = 50, pcwoc = 0;
+    double datum = 0, pdatun = 3000, z_woc = 40, pcwoc = 0;
 
     // WELL
     List<Well> wells =
     [
         // Injector at Block 0
-        new Well(WellType.Producer, "WP1", 0.5, 0, 1500, 9000, 36, 87, [0,0], [0, 100, 200, 300, 400], [0, 300, 600, 900, 1200]),
+        new Well(WellType.Producer, "WP1", 0.5, 0, 1500, 9000, 36, 87, [0,0], [0, 100, 200, 300, 400], lrate:[0, 300, 600, 900, 1200]),
         // Producer at Block 9
-        new Well(WellType.Producer, "WP2", 0.5, 0, 1500, 9000, 12, 87, [0,0], [0, 100, 200, 300, 400], [0, 300, 600, 900, 1200]),
+        new Well(WellType.Producer, "WP2", 0.5, 0, 1500, 9000, 12, 87, [0,0], [0, 100, 200, 300, 400], rate:[0, 300, 600, 900, 1200]),
         // Producer at Block 9
-        new Well(WellType.Injector, "WI1", 0.5, 0, 1500, 9000, 17, 15, [4,4], [0, 100, 200, 300, 400], [0, 700, 1400, 2100, 2800]),
+        new Well(WellType.Injector, "WI1", 0.5, 0, 1500, 9000, 17, 15, [4,4], [0, 100, 200, 300, 400], rate:[0, 700, 1400, 2100, 2800]),
     ];
 
     //--AQUID              I1   I2    J1   J2     K1    K2                   FACE          CNCT_EFF

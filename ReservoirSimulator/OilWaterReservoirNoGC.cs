@@ -863,9 +863,7 @@ namespace ReservoirSimulator
                     pwell.CopyFrom(xnp1[2*Ngrids + 2*nwell]);
                     qwell.CopyFrom(xnp1[2*Ngrids + 2*nwell + 1]);
                     Res[2*Ngrids + 2*nwell].Clear().AddProductInPlace(qwell, dt);
-                    well.Constraint(time, pwell, qwell, Res[2*Ngrids + 2*nwell + 1]);
                     well.WaterRate = 0; well.OilRate = 0; Zref = well.Zref;
-
                     switch (well.WellType)
                     {
                         case WellType.Producer:
@@ -924,6 +922,7 @@ namespace ReservoirSimulator
                             }
                             break;
                     }
+                    well.Constraint(time, pwell, Res[2*Ngrids + 2*nwell + 1]);
                 }
                 b.Clear(); a_value.Clear();
                 a_index.Clear(); a_start.Clear();
@@ -945,7 +944,7 @@ namespace ReservoirSimulator
             Time = [0.0]; SweepEff = [0.0];
             List<double> Interval = [0, .. ResultTime];
             foreach (var well in Wells)
-                Interval.AddRange(well.ProductionProfile.Time);
+                Interval.AddRange(well.LiqRateProfile.Time);
             Interval = [.. Interval.Distinct().OrderBy(x => x)];
             Console.WriteLine($"""
                     ======================================================================

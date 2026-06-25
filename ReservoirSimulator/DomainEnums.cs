@@ -16,7 +16,8 @@
         LiqRate,
         OilRate,
         WaterRate,
-        GasRate
+        GasRate,
+        Rate
     }
 
     public enum WellType

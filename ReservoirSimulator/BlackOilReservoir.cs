@@ -332,7 +332,7 @@ namespace ReservoirSimulator
                 Pwf = [Pwells_n], WaterCut = [new double[Nwells]];
             List<double> Time = [0.0], SweepEff = [0.0], Interval = [0, .. ResultTime];
             foreach (var well in Wells)
-                Interval.AddRange(well.ProductionProfile.Time);
+                Interval.AddRange(well.LiqRateProfile.Time);
             Interval = [.. Interval.Distinct().OrderBy(x => x)];
             Console.WriteLine($"""
                     ======================================================================
