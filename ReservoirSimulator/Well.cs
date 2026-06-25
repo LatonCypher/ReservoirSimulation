@@ -50,6 +50,7 @@ namespace ReservoirSimulator
         public int I { get; }
         public int J { get; }
         public int[] PerfInterval { get; }
+        public List<double> ProfileTime { get => profileTime; }
         public ConstraintType ConstraintType { get; set; } = ConstraintType.LiqRate;
         public WellType WellType { get; set; }
         public (List<double> Time, List<double> Rate) LiqRateProfile { get; set; }
@@ -61,6 +62,8 @@ namespace ReservoirSimulator
 
         int[] perforation_NatIndex;
         double[] productivity_Index;
+        List<double> profileTime;
+
 
         public Well(WellType welltype, string name, double radius, double skin, double minPressure, double maxPressure,
             int i, int j, int[] perfInterval, List<double> time, List<double> orate = null, List<double> wrate = null, 
@@ -74,6 +77,7 @@ namespace ReservoirSimulator
             MaxPressure = maxPressure;
             I = i; J = j;
             PerfInterval = perfInterval;
+            profileTime = time;
             if (lrate is not null)
             { LiqRateProfile = (Time: time, Rate: lrate); ConstraintType = ConstraintType.LiqRate; }
             if (orate is not null)
