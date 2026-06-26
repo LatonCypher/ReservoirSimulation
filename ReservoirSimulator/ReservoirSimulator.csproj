@@ -11,7 +11,6 @@
     <PackageReference Include="SepalSolver" Version="1.1.8.3" />
     <PackageReference Include="SepalSolver.PlotLib" Version="1.1.8.3" />
   </ItemGroup>
-
   <ItemGroup>
     <ProjectReference Include="..\EclipseDeckReader\EclipseDeckReader.csproj" />
   </ItemGroup>

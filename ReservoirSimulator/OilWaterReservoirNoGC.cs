@@ -336,25 +336,26 @@ namespace ReservoirSimulator
             }
         }
 
-        (double[] Po, double[] Sw, double[] Pwell, double[] Qwell, double maxDP, double maxDS, int j) ExtractSolution()
+        (double[] Po, double[] Sw, double[] Pwell, double[] Qwell, double maxDP, double maxDS, int i_p, int i_s) ExtractSolution()
         {
-            int indx = 0, j = 0; double maxDp = 0, maxDs = 0;
+            int indx = 0, i_p = 0, i_s = 0; double maxDp = 0, maxDs = 0;
             double[] Po = new double[Ngrids], Sw = new double[Ngrids],
                 Pwell = new double[Nwells], Qwell = new double[Nwells];
             for (int i = 0; i < Ngrids; i++)
             {
                 Po[i] = xs[indx++].Value; // Matches Po index
                 Sw[i] = xs[indx++].Value; // Matches Sw index
-                maxDp = Max(maxDp, Abs(Po[i] - Po_n[i]));
+                if (Abs(Po[i] - Po_n[i]) > maxDp)
+                { i_p = i; maxDp = Abs(Po[i] - Po_n[i]); }
                 if (Abs(Sw[i] - Sw_n[i]) > maxDs)
-                { j = i; maxDs = Abs(Sw[i] - Sw_n[i]); }
+                { i_s = i; maxDs = Abs(Sw[i] - Sw_n[i]); }
             }
             for (int i = 0; i < Nwells; i++)
             {
                 Pwell[i] = xs[indx++].Value; // Matches Pwf index
                 Qwell[i] = xs[indx++].Value; // Matches Q index
             }
-            return (Po, Sw, Pwell, Qwell, maxDp, maxDs, j);
+            return (Po, Sw, Pwell, Qwell, maxDp, maxDs, i_p, i_s);
         }
 
         double[] LinSolve(List<double> a_value, List<int> a_index, List<int> a_start, List<double> b)
@@ -922,7 +923,7 @@ namespace ReservoirSimulator
                             }
                             break;
                     }
-                    well.Constraint(time, pwell, Res[2*Ngrids + 2*nwell + 1]);
+                    well.Constraint(time, pwell, qwell, Res[2*Ngrids + 2*nwell + 1]);
                 }
                 b.Clear(); a_value.Clear();
                 a_index.Clear(); a_start.Clear();
@@ -998,20 +999,22 @@ namespace ReservoirSimulator
                     }
 
                     // Unpack solution values to evaluate operational constraint validations
-                    var Sol = ExtractSolution();
-                    if (Sol.maxDP > 100 || Sol.maxDS > 0.15)
+                    var (Po, Sw, Pwell, Qwell, maxDP, maxDS, i_p, i_s) = ExtractSolution();
+                    if (maxDP > 400 || maxDS > 0.15)
                     {
+                        int j = maxDP > 400 ? i_p : i_s;
+                        double limit = maxDP > 400 ? 400 : 0.15;
+                        double change = maxDP > 400 ? maxDP : maxDS;
                         Console.ForegroundColor = ConsoleColor.Yellow;
                         Console.WriteLine($"\n[Warning] Time Step Rejected: State Change Limit Exceeded.");
                         Console.ResetColor();
-                        Console.WriteLine($"    ↳ Location       : Cell Index {Sol.j}");
-                        Console.WriteLine($"    ↳ Violation      : {(Sol.maxDP > 100 ? "ΔP" : "ΔS")} = {(Sol.maxDP > 100 ? Sol.maxDP.ToString("F4") : Sol.maxDS.ToString("F4"))} (Max Allowed: {(Sol.maxDP > 100 ? 400.ToString("F4") : 0.15.ToString("F4"))})");
-                        Console.WriteLine($"    ↳ Current State  : P = {Po_n[Sol.j]:F1} psi | Sw = {Sw_n[Sol.j]:F4}");
-                        Console.WriteLine($"    ↳ Attempted State: P = {Sol.Po[Sol.j]:F1} psi | Sw = {Sol.Sw[Sol.j]:F4}");
+                        Console.WriteLine($"    ↳ Location       : Cell Index {j}");
+                        Console.WriteLine($"    ↳ Violation      : {(maxDP > 400 ? "ΔP" : "ΔS")} = {change:F4} (Max Allowed: {limit:F4})");
+                        Console.WriteLine($"    ↳ Current State  : P = {Po_n[j]:F1} psi | Sw = {Sw_n[j]:F4}");
+                        Console.WriteLine($"    ↳ Attempted State: P = {Po[j]:F1} psi | Sw = {Sw[j]:F4}");
                         Console.WriteLine($"    ↳ Solver Action  : Rolling back to t = {t:F3} days.");
                         Console.WriteLine($"    ↳ Time-Step Chop : Reducing Δt from {dt:F2} to {0.5*dt:F2} days (Factor: 0.5).\n");
                         dt = 0.5*dt;
-                        GuessReset();
                         continue;
                     }
 
@@ -1023,8 +1026,8 @@ namespace ReservoirSimulator
                         if (Wells[n].WellType == WellType.Producer)
                         {
                             // switch to BHP control if pressure falls below minimum limits
-                            if (Wells[n].ConstraintType == ConstraintType.LiqRate &&
-                                Sol.Pwell[n] < Wells[n].MinPressure)
+                            if (Wells[n].ConstraintType != ConstraintType.MinPressure &&
+                                Pwell[n] < Wells[n].MinPressure)
                             {
                                 Wells[n].ConstraintType = ConstraintType.MinPressure;
                                 Console.WriteLine("""
@@ -1042,8 +1045,8 @@ namespace ReservoirSimulator
                         {
 
                             // switch to BHP control if pressure exceeds fracturing limits
-                            if (Wells[n].ConstraintType == ConstraintType.LiqRate &&
-                                Sol.Pwell[n] > Wells[n].MaxPressure)
+                            if (Wells[n].ConstraintType != ConstraintType.MaxPressure &&
+                                Pwell[n] > Wells[n].MaxPressure)
                             {
                                 Wells[n].ConstraintType = ConstraintType.MaxPressure;
                                 Console.WriteLine("""
@@ -1063,7 +1066,7 @@ namespace ReservoirSimulator
                     }
 
                     // Log verified parameters to performance history arrays
-                    Po_n = Sol.Po; Sw_n = Sol.Sw; Pwells_n = Sol.Pwell; Qwells_n = Sol.Qwell;
+                    Po_n = Po; Sw_n = Sw; Pwells_n = Pwell; Qwells_n =  Qwell;
                     Time.Add(t = tnp1); isComplete = Abs(t - L) < 1e-13;
                     P.Add([.. Po_n]); S.Add([.. Sw_n]); Rate.Add([.. Qwells_n]); Pwf.Add([.. Pwells_n]);
                     WaterCut.Add([.. Wells.Select(w => w.WaterCut)]);

@@ -1,10 +1,4 @@
-﻿using FFmpeg.AutoGen;
-using MKLNET;
-using ScottPlot;
-using ScottPlot.AxisLimitManagers;
-using ScottPlot.Colormaps;
-using ScottPlot.Palettes;
-using ScottPlot.TickGenerators.TimeUnits;
+﻿using MKLNET;
 using SepalSolver;
 using System.Drawing;
 using System.Runtime.CompilerServices;

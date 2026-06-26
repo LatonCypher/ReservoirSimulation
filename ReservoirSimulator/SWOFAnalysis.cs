@@ -1,5 +1,4 @@
-﻿using FFmpeg.AutoGen;
-using System;
+﻿using System;
 using SepalSolver;
 
 namespace ReservoirSimulator

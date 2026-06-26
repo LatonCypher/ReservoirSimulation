@@ -1,5 +1,6 @@
 ﻿using SepalSolver;
 using System.Text;
+using System.Timers;
 using static ReservoirSimulator.Math;
 
 namespace ReservoirSimulator
@@ -7,7 +8,7 @@ namespace ReservoirSimulator
     public class OilWaterReservoir
     {
         public int funcall;
-        public List<double[]> P, S, Rate, Pwf, WaterCut;
+        public List<double[]> P, S, Rate, OilRate, WaterRate, GasRate, Pwf, WaterCut;
         public List<double> Time, SweepEff;
         readonly Func<ADiff, ADiff> Sws, Swe, Pc_D, Pc_I, Bo, Bw, μo, μw, γo, γw, Kro, Krw, Er;
         // Define conversion constants
@@ -30,16 +31,18 @@ namespace ReservoirSimulator
         List<double> a_value = [], b = [];
         List<int> a_index = [], a_start = [0];
 
-        double betweenab(double a, double b, double f) => a + f*(b-a);
-        double interps(List<double> X, List<double> Y, double x)
+        static double betweenab(double a, double b, double f) => a + f*(b-a);
+        static double interps(List<double> X, List<double> Y, double x)
         {
-            int i = X.FindIndex(xi => xi > x);
+            int i = 0, j = 1;
+            while (j < X.Count && X[j] < x) (i, j) = (j, j + 1);
             double f = (x - X[i-1])/(X[i] - X[i-1]);
             return betweenab(Y[i-1], Y[i], f);
         }
-        double[] interpa(List<double> X, List<double[]> Y, double x)
+        static double[] interpa(List<double> X, List<double[]> Y, double x)
         {
-            int i = X.FindIndex(xi => xi > x);
+            int i = 0, j = 1;
+            while (j < X.Count && X[j] < x) (i, j) = (j, j + 1);
             double f = (x - X[i-1])/(X[i] - X[i-1]);
             return [.. Y[i-1].Zip(Y[i], (a, b) => betweenab(a, b, f))];
         }
@@ -81,8 +84,14 @@ namespace ReservoirSimulator
             }
             for (int i = 0; i < Nwells; i++)
             {
-                xs[indx++].Value = Pwells_n[i]; // Matches Pwf index
-                xs[indx++].Value = Qwells_n[i]; // Matches Q index
+                xs[indx++].Value = Pwells_n[i];                        // Matches Pwf index
+                xs[indx++].Value = Wells[i].ConstraintType switch
+                {
+                    ConstraintType.MaxPressure => Qwells_n[i],
+                    ConstraintType.MinPressure => Qwells_n[i],
+                    _ => Wells[i].ComputeRate(dt + Time[n])
+                }; // Matches Q index
+
             }
         }
         double[] LinSolve(List<double> a_value, List<int> a_index, List<int> a_start, List<double> b)
@@ -583,6 +592,7 @@ namespace ReservoirSimulator
                         case WellType.Producer:
                             foreach (int m in well.Perforation_NatIndex)
                             {
+                                if (Actnum[m] == 0) continue;
                                 int indx1 = 2*m, indx2 = 2*m+1;
                                 ADiff po_m = xnp1[indx1], sw_m = xnp1[indx2],
                                 pw_m = po_m - Pc_I(sw_m), so_m = 1 - sw_m,
@@ -609,6 +619,7 @@ namespace ReservoirSimulator
                         case WellType.Injector:
                             foreach (int m in well.Perforation_NatIndex)
                             {
+                                if (Actnum[m] == 0) continue;
                                 int indx1 = 2*m, indx2 = 2*m+1;
                                 ADiff po_m = xnp1[indx1], sw_m = xnp1[indx2],
                                 pw_m = po_m - Pc_I(sw_m), so_m = 1 - sw_m,
@@ -624,7 +635,7 @@ namespace ReservoirSimulator
                             }
                             break;
                     }
-                    Res[2*Ngrids + 2*nwell + 1] = well.Constraint(time, pwell);
+                    Res[2 * Ngrids + 2 * nwell + 1] = well.Constraint(time, pwell, qwell);
                 }
                 b.Clear(); a_value.Clear();
                 a_index.Clear(); a_start.Clear();
@@ -641,7 +652,7 @@ namespace ReservoirSimulator
                     (a_start, a_index, a_value) = DeleteCol(a_start, a_index, a_value, Columns2Delete);
             }
 
-            dt = 0.001;
+            dt = 0.01;
             // Initialize historical data tracking containers for plotting and reporting
             P = [Po_n]; S = [Sw_n]; Rate = [Qwells_n];
             Pwf = [Pwells_n]; WaterCut = [new double[Nwells]];
@@ -678,7 +689,7 @@ namespace ReservoirSimulator
                     Time: 
                     {tnp1:E4} days
                         iter  |   Residual Norm  
-                    ----------+----------------
+                    ----------+------------------
                     """);
                     int iter; bool isConverged = false;
                     for (iter = 1; iter < 10; iter++)
@@ -705,29 +716,29 @@ namespace ReservoirSimulator
                     // chop the time step (time-step cuts) and retry.
                     if (!isConverged)
                     {
-                        dt = 0.25*dt;
+                        dt = 0.01*dt;
                         Console.WriteLine("""
-                                ================================================
-                                           Rejected (Non-Convergence)
-                                ================================================
+                                ============================
+                                 Rejected (Non-Convergence)
+                                ============================
                                 """);
                         continue;
                     }
 
                     // Unpack solution values to evaluate operational constraint validations
-                    var Sol = ExtractSolution();
-                    if (Sol.maxDP > 400 || Sol.maxDS > 0.15)
+                    var (Po, Sw, Pwell, Qwell, maxDP, maxDS, i_p, i_s) = ExtractSolution();
+                    if (maxDP > 400 || maxDS > 0.15)
                     {
-                        int j = Sol.maxDP > 400 ? Sol.i_p : Sol.i_s;
-                        double limit = Sol.maxDP > 400 ? 400 : 0.15;
-                        double change = Sol.maxDP > 400 ? Sol.maxDP : Sol.maxDS;
+                        int j = maxDP > 400 ? i_p : i_s;
+                        double limit = maxDP > 400 ? 400 : 0.15;
+                        double change = maxDP > 400 ? maxDP : maxDS;
                         Console.ForegroundColor = ConsoleColor.Yellow;
                         Console.WriteLine($"\n[Warning] Time Step Rejected: State Change Limit Exceeded.");
                         Console.ResetColor();
                         Console.WriteLine($"    ↳ Location       : Cell Index {j}");
-                        Console.WriteLine($"    ↳ Violation      : {(Sol.maxDP > 400 ? "ΔP" : "ΔS")} = {change.ToString("F4")} (Max Allowed: {limit.ToString("F4")})");
+                        Console.WriteLine($"    ↳ Violation      : {(maxDP > 400 ? "ΔP" : "ΔS")} = {change:F4} (Max Allowed: {limit:F4})");
                         Console.WriteLine($"    ↳ Current State  : P = {Po_n[j]:F1} psi | Sw = {Sw_n[j]:F4}");
-                        Console.WriteLine($"    ↳ Attempted State: P = {Sol.Po[j]:F1} psi | Sw = {Sol.Sw[j]:F4}");
+                        Console.WriteLine($"    ↳ Attempted State: P = {Po[j]:F1} psi | Sw = {Sw[j]:F4}");
                         Console.WriteLine($"    ↳ Solver Action  : Rolling back to t = {t:F3} days.");
                         Console.WriteLine($"    ↳ Time-Step Chop : Reducing Δt from {dt:F2} to {0.5*dt:F2} days (Factor: 0.5).\n");
                         dt = 0.5*dt;
@@ -742,7 +753,7 @@ namespace ReservoirSimulator
                         if (Wells[n].WellType == WellType.Producer)
                         {
                             // switch to BHP control if pressure falls below minimum limits
-                            if (Wells[n].ConstraintType == ConstraintType.LiqRate &&
+                            if (Wells[n].ConstraintType != ConstraintType.MinPressure &&
                                 Pwells_n[n] < Wells[n].MinPressure)
                             {
                                 Wells[n].ConstraintType = ConstraintType.MinPressure;
@@ -760,7 +771,7 @@ namespace ReservoirSimulator
                         {
 
                             // switch to BHP control if pressure exceeds fracturing limits
-                            if (Wells[n].ConstraintType == ConstraintType.LiqRate &&
+                            if (Wells[n].ConstraintType != ConstraintType.MaxPressure &&
                                 Pwells_n[n] > Wells[n].MaxPressure)
                             {
                                 Wells[n].ConstraintType = ConstraintType.MaxPressure;
@@ -777,7 +788,7 @@ namespace ReservoirSimulator
                     
 
                     // Log verified parameters to performance history arrays
-                    Po_n = Sol.Po; Sw_n = Sol.Sw; Pwells_n = Sol.Pwell; Qwells_n = Sol.Qwell;
+                    Po_n = Po; Sw_n = Sw; Pwells_n = Pwell; Qwells_n = Qwell;
                     Time.Add(t = tnp1); isComplete = Abs(t - L) < 1e-13;
                     P.Add(Po_n); S.Add(Sw_n); Rate.Add(Qwells_n); Pwf.Add(Pwells_n);
                     WaterCut.Add([.. Wells.Select(w => w.WaterCut)]);
@@ -795,7 +806,7 @@ namespace ReservoirSimulator
                     // scale dt up if convergence is fast, scale down if slow
                     if (iter < 4) dt = 1.25*dt;
                     if (iter > 8) dt = 0.5*dt;
-                    if (dt < 1e-8) throw new Exception("time step is too small");
+                    if (dt < 1e-12) throw new Exception("time step is too small");
 
                     // Prevent Overshoot
                     if (!isComplete) dt = Min(dt, L - t);
@@ -843,14 +854,17 @@ namespace ReservoirSimulator
             pvdSb.AppendLine("<VTKFile type=\"Collection\" version=\"0.1\" byte_order=\"LittleEndian\">");
             pvdSb.AppendLine("  <Collection>");
 
-            for (int t = 0; t < time.Count; t++)
+            double delt = time.Last()/1000;
+
+            for (int framenum = 0; framenum <= 1000; framenum++)
             {
-                double currentTime = time[t];
-                double[] cellS = S[t];
-                double[] cellP = P[t];
+                double t = framenum*delt;
+                double currentTime = t;
+                double[] cellS = interpa(time, S, t);
+                double[] cellP = interpa(time, P, t);
 
                 // Unique filename for each timestep's grid data in the same directory
-                string vtrFileName = $"{caseName}Time{t}.vtr";
+                string vtrFileName = $"{caseName}Time{framenum}.vtr";
 
                 // PVD now links directly to the standalone VTR file
                 pvdSb.AppendLine($"    <DataSet timestep=\"{currentTime.ToString(fFormat)}\" group=\"\" part=\"0\" file=\"{vtrFileName}\"/>");

@@ -12,7 +12,7 @@ namespace ReservoirSimulator
         public double MaxPressure { get; }
         public double ComputeRate(double time)
         {
-            var (Time, Rate)= ConstraintType switch
+            var (Time, Rate) = ConstraintType switch
             {
                 ConstraintType.LiqRate => LiqRateProfile,
                 ConstraintType.OilRate => OilRateProfile,
@@ -24,11 +24,12 @@ namespace ReservoirSimulator
 
             while (nextindex < Time.Count && Time[nextindex] < time)
                 (lastindex, nextindex) = (nextindex, nextindex + 1);
-            double rate = Rate[lastindex];
+            double qlast = lastindex > 0 ? Rate[lastindex-1] : 0;
+            double rate = Rate[lastindex], ramp = 1 - Exp(Time[lastindex] - time);
             return WellType switch
             {
-                WellType.Producer => -Abs(rate),
-                WellType.Injector => Abs(rate),
+                WellType.Producer => -Abs(qlast + ramp*(rate - qlast)),
+                WellType.Injector => Abs(qlast + ramp*(rate - qlast)),
                 _ => 0,
             };
         }
@@ -107,34 +108,23 @@ namespace ReservoirSimulator
                 productivity_Index[i++] = alpha_well*Sqrt(Kx[m]*Ky[m])*Dz[m]/(Log(re/Radius) + Skin);
             }
         }
-        internal ADiff Constraint(double time, ADiff Pressure)
+        internal ADiff Constraint(double time, ADiff Pressure, ADiff Rate)
         {
             return ConstraintType switch
             {
-                ConstraintType.LiqRate => LiqRate - ComputeRate(time),
-                ConstraintType.OilRate => OilRate - ComputeRate(time),
-                ConstraintType.WaterRate => WaterRate - ComputeRate(time),
-                ConstraintType.GasRate => GasRate - ComputeRate(time),
-                ConstraintType.Rate => WaterRate - ComputeRate(time),
                 ConstraintType.MaxPressure => Pressure - MaxPressure,
                 ConstraintType.MinPressure => Pressure - MinPressure,
-                _ => 0,
+                _ => Rate - ComputeRate(time)
             };
         }
 
-        internal ADiff Constraint(double time, ADiff Pressure, ADiff ConstraintValue)
+        internal ADiff Constraint(double time, ADiff Pressure, ADiff Rate, ADiff ConstraintValue)
         {
-            ConstraintValue.Clear();
             return ConstraintType switch
             {
-                ConstraintType.LiqRate => ConstraintValue.CopyFrom(LiqRate).SubtractInPlace(ComputeRate(time)),
-                ConstraintType.OilRate => ConstraintValue.CopyFrom(OilRate).SubtractInPlace(ComputeRate(time)),
-                ConstraintType.WaterRate => ConstraintValue.CopyFrom(WaterRate).SubtractInPlace(ComputeRate(time)),
-                ConstraintType.GasRate => ConstraintValue.CopyFrom(GasRate).SubtractInPlace(ComputeRate(time)),
-                ConstraintType.Rate => ConstraintValue.CopyFrom(WaterRate).SubtractInPlace(ComputeRate(time)),
                 ConstraintType.MaxPressure => ConstraintValue.CopyFrom(Pressure).SubtractInPlace(MaxPressure),
                 ConstraintType.MinPressure => ConstraintValue.CopyFrom(Pressure).SubtractInPlace(MinPressure),
-                _ => ConstraintValue.Clear(),
+                _ => ConstraintValue.CopyFrom(Rate).SubtractInPlace(ComputeRate(time)),
             };
         }
 

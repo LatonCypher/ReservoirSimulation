@@ -186,7 +186,7 @@ static int[] ReadActnumFile(string filePath)
 {   // Eclipse Style Input
 
     // DIMENS
-    int nx = 46, ny = 112, nz = 5;
+    int nx = 46, ny = 100, nz = 5;
 
     // GRID
     double[] dx = Repmat(25, nx*ny*nz), dy = Repmat(25, nx*ny*nz),
@@ -248,12 +248,11 @@ static int[] ReadActnumFile(string filePath)
     // WELL
     List<Well> wells =
     [
-        // Injector at Block 0
-        new Well(WellType.Producer, "WP1", 0.5, 0, 1500, 9000, 36, 87, [0,0], [0, 100, 200, 300, 400], lrate:[0, 300, 600, 900, 1200]),
-        // Producer at Block 9
-        new Well(WellType.Producer, "WP2", 0.5, 0, 1500, 9000, 12, 87, [0,0], [0, 100, 200, 300, 400], rate:[0, 300, 600, 900, 1200]),
-        // Producer at Block 9
-        new Well(WellType.Injector, "WI1", 0.5, 0, 1500, 9000, 17, 15, [4,4], [0, 100, 200, 300, 400], rate:[0, 700, 1400, 2100, 2800]),
+        new Well(WellType.Producer, "WP1", 0.5, 0, 1500, 9000, 36, 50, [0,0], [0, 100, 200, 300, 400], lrate:[0, 300, 600, 900, 1200]),
+        new Well(WellType.Producer, "WP2", 0.5, 0, 1500, 9000, 12, 50, [0,0], [0, 100, 200, 300, 400], lrate:[0, 300, 600, 900, 1200]),
+        new Well(WellType.Injector, "WI1", 0.5, 0, 1500, 9000, 17, 10, [4,4], [0, 100, 200, 300, 400], rate:[0, 200, 400, 600, 800]),
+        new Well(WellType.Injector, "WI2", 0.5, 0, 1500, 9000, 36, 90, [0,0], [0, 100, 200, 300, 400], rate:[0, 200, 400, 600, 800]),
+        new Well(WellType.Injector, "WI3", 0.5, 0, 1500, 9000, 12, 90, [0,0], [0, 100, 200, 300, 400], rate:[0, 200, 400, 600, 800]),
     ];
 
     //--AQUID              I1   I2    J1   J2     K1    K2                   FACE          CNCT_EFF
@@ -302,6 +301,14 @@ static int[] ReadActnumFile(string filePath)
     reservoir.Simulate2Phase(resultTime, wells);
     Console.WriteLine($"Simulation completed successfully without crashing in {toc():F2} seconds!");
 
+    wells =
+    [
+        new Well(WellType.Producer, "WP1", 0.5, 0, 1500, 9000, 36, 50, [0,0], [0, 100, 200, 300, 400], lrate:[0, 300, 600, 900, 1200]),
+        new Well(WellType.Producer, "WP2", 0.5, 0, 1500, 9000, 12, 50, [0,0], [0, 100, 200, 300, 400], lrate:[0, 300, 600, 900, 1200]),
+        new Well(WellType.Injector, "WI1", 0.5, 0, 1500, 9000, 17, 10, [4,4], [0, 100, 200, 300, 400], rate:[0, 200, 400, 600, 800]),
+        new Well(WellType.Injector, "WI2", 0.5, 0, 1500, 9000, 36, 90, [0,0], [0, 100, 200, 300, 400], rate:[0, 200, 400, 600, 800]),
+        new Well(WellType.Injector, "WI3", 0.5, 0, 1500, 9000, 12, 90, [0,0], [0, 100, 200, 300, 400], rate:[0, 200, 400, 600, 800]),
+    ];
 
     reservoir.ExportParaView("C:\\Users\\lateef.a.kareem\\Documents\\GitHub\\ReservoirSimulation\\RunTest1");
     reservoir.ExportWells("C:\\Users\\lateef.a.kareem\\Documents\\GitHub\\ReservoirSimulation\\RunTest1");
