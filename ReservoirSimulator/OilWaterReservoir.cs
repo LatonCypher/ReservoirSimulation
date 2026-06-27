@@ -1,4 +1,6 @@
 ﻿using SepalSolver;
+using System.Diagnostics.Metrics;
+using System.Numerics;
 using System.Text;
 using System.Timers;
 using static ReservoirSimulator.Math;
@@ -36,6 +38,7 @@ namespace ReservoirSimulator
         {
             int i = 0, j = 1;
             while (j < X.Count && X[j] < x) (i, j) = (j, j + 1);
+            if (i == 0 || j == X.Count) return Y[i];
             double f = (x - X[i-1])/(X[i] - X[i-1]);
             return betweenab(Y[i-1], Y[i], f);
         }
@@ -43,6 +46,7 @@ namespace ReservoirSimulator
         {
             int i = 0, j = 1;
             while (j < X.Count && X[j] < x) (i, j) = (j, j + 1);
+            if (i == 0 || j == X.Count) return Y[i];
             double f = (x - X[i-1])/(X[i] - X[i-1]);
             return [.. Y[i-1].Zip(Y[i], (a, b) => betweenab(a, b, f))];
         }
@@ -100,11 +104,12 @@ namespace ReservoirSimulator
         }
 
         readonly int Nx, Ny, Nz, NxNy, Ngrids, Nwells, varNum;
-        readonly double[] Kx, Ky, Kz, Φ, Dx, Dy, Dz, Z;
-        double[] Po_n, Sw_n, Pw_n, So_n, Qwells_n, Pwells_n, ErSw_Bw_n, ErSo_Bo_n;
+        readonly double[] Kx, Ky, Kz, Φ, Dx, Dy, Dz, Z, zTop;
+        double[] Po_n, Sw_n, Pw_n, So_n, Qwells_n, Pwells_n, ErSw_Bw_n, ErSo_Bo_n, Coord, Zcorn, PoreVolume; 
         readonly double krw0, kro0, Pb, Prefw, Prefr, Pe, Pw_woc, Sw_r, So_r,
             Bo0, Bw0, Po_woc, Z_woc, co, cw, cr, bo, bw, nw, no, np,
             μo0, μw0, γo0, γw0, P_datum, Z_datum, Pc_max;
+        Grid[] Grids;
         List<Well> Wells;
         Aquifer Aquifer;
         double[,] Trans;
@@ -144,7 +149,13 @@ namespace ReservoirSimulator
             Aquifer _aquifer = null,
 
             // ACTNUM
-            int[] _actnum = null)
+            int[] _actnum = null,
+
+            // COORD
+            double[] _coord = null,
+
+            //
+            double[] _zcorn = null)
         {
             ADiff.capacity = 16;
             Nx = _nx; Ny = _ny; Nz = _nz; NxNy = Nx*Ny; Ngrids = Nx*Ny*Nz;
@@ -153,6 +164,7 @@ namespace ReservoirSimulator
             Wells = _wells; Aquifer = _aquifer;
 
             // Extract the Z
+            zTop = _zTop;
             Z = new double[Ngrids];
             if (_zTop.Length != NxNy)
                 throw new Exception($"Number of elements in TOPS must be equal to {NxNy}");
@@ -225,7 +237,48 @@ namespace ReservoirSimulator
             Wells = _wells; Nwells = Wells.Count; varNum = 2*Ngrids + 2*Nwells;
             Aquifer = _aquifer;
             Actnum = _actnum is not null? _actnum:[.. Enumerable.Repeat(1, Ngrids)];
+            Grids = Zcorn is not null ? ProcessGrid(Coord, Zcorn) : ProcessGrid(Nx, Ny, Nz, Dx, Dy, Dz, zTop);
+            PoreVolume = [.. Grids.Select(g => g.PoreVolume)];
+
         }
+
+        private Grid[] ProcessGrid(double[] coord, double[] zcorn)
+        {
+            
+        }
+        private Grid[] ProcessGrid(int nx, int ny, int nz, double[] dx, double[] dy, double[] dz, double[] zTop, double[] Φ, double[] permx, double[] permy, double[] permz)
+        {
+            Grids = new Grid[Ngrids];
+            for (int m = 0; m < Ngrids; m++)
+            {
+                int k = m / NxNy, rem = m % NxNy, j = rem / Nx, i = rem % Nx;
+                Grids[m] = new Grid
+                {
+                    Indices = [.. Enumerable.Range(0, 8)],
+                    NTG = 1.0,
+                    Porosity = Φ[m],
+                    Volume = Dx[m] * Dy[m] * Dz[m],
+                    PoreVolume = Dx[m] * Dy[m] * Dz[m] * Φ[m] / beta,
+                    Corners = new Vector3[8]
+                };
+                double zUpper = zTop[j * Nx + i] + (k * Dz[m]);
+                double zLower = zUpper + Dz[m];
+
+                // Extract the 8 structural corner points for a Hexahedron matching VTK specifications
+                // Bottom plane points (Z-Upper)
+                Grids[m].Corners[0] = new Vector3(xCoords[i], yCoords[j], zUpper);     // Point 0
+                xmlPoints.AppendLine($"{xCoords[i+1]} {yCoords[j]} {zUpper}");   // Point 1
+                xmlPoints.AppendLine($"{xCoords[i+1]} {yCoords[j+1]} {zUpper}"); // Point 2
+                xmlPoints.AppendLine($"{xCoords[i]} {yCoords[j+1]} {zUpper}");   // Point 3
+                                                                                 // Top plane points (Z-Lower)
+                xmlPoints.AppendLine($"{xCoords[i]} {yCoords[j]} {zLower}");     // Point 4
+                xmlPoints.AppendLine($"{xCoords[i+1]} {yCoords[j]} {zLower}");   // Point 5
+                xmlPoints.AppendLine($"{xCoords[i+1]} {yCoords[j+1]} {zLower}"); // Point 6
+                xmlPoints.AppendLine($"{xCoords[i]} {yCoords[j+1]} {zLower}");   // Point 7
+            }
+            return Grids;
+        }
+
         public OilWaterReservoir(int _nx, int _ny, int _nz,
             double[] _perm, double[] _phi, double[] _dx, double[] _dy,
             double[] _dz, double[] _z, double _peow, double _pw_woc,
@@ -247,6 +300,7 @@ namespace ReservoirSimulator
             Wells = _wells; Nwells = Wells.Count; varNum = 2*Ngrids + 2*Nwells;
             Aquifer = _aquifer;
             Actnum = _actnum is not null ? _actnum : [.. Enumerable.Repeat(1, Ngrids)];
+            PoreVolume = [.. Enumerable.Range(0, Ngrids).Select(i => Dx[i]*Dy[i]*Dz[i]*Φ[i]/beta)];
 
 
             Sws = Sw => (Sw - Sw_r)/(1 - Sw_r);
@@ -547,15 +601,13 @@ namespace ReservoirSimulator
                     {
                         if (Actnum[m] == 0) continue;
                         int indx1 = 2*m, indx2 = 2*m + 1;
-                        double PV = -Dx[m]*Dy[m]*Dz[m]*Φ[m]/beta;
                         ADiff po_m = xnp1[2*m], sw_m = xnp1[2*m+1],
-                            pw_m = po_m - Pc_I(sw_m),
-                            so_m = 1 - sw_m;
+                            pw_m = po_m - Pc_I(sw_m), so_m = 1 - sw_m;
                         var meanP = so_m*po_m + sw_m*pw_m;
                         ErSo_Bo_np1[m] = Er(meanP)*so_m/Bo(po_m);
                         ErSw_Bw_np1[m] = Er(meanP)*sw_m/Bw(pw_m);
-                        Res[indx1] = PV*(ErSo_Bo_np1[m] - ErSo_Bo_n[m]);
-                        Res[indx2] = PV*(ErSw_Bw_np1[m] - ErSw_Bw_n[m]);
+                        Res[indx1] = -PoreVolume[m]*(ErSo_Bo_np1[m] - ErSo_Bo_n[m]);
+                        Res[indx2] = PoreVolume[m]*(ErSw_Bw_np1[m] - ErSw_Bw_n[m]);
 
                         int k = m / NxNy, rem = m % NxNy,
                         j = rem / Nx, i = rem % Nx;
@@ -652,7 +704,7 @@ namespace ReservoirSimulator
                     (a_start, a_index, a_value) = DeleteCol(a_start, a_index, a_value, Columns2Delete);
             }
 
-            dt = 0.01;
+            dt = 0.1;
             // Initialize historical data tracking containers for plotting and reporting
             P = [Po_n]; S = [Sw_n]; Rate = [Qwells_n];
             Pwf = [Pwells_n]; WaterCut = [new double[Nwells]];
@@ -817,7 +869,7 @@ namespace ReservoirSimulator
         }
 
         private double[] xCoords, yCoords, zCoords;
-        public void ExportParaView(string folderPath)
+        public void ExportParaViewVTR(string folderPath)
         {
             xCoords = CalculateCoordinates([.. Enumerable.Range(0, Nx).Select(i => Dx[i])]);
             yCoords = CalculateCoordinates([.. Enumerable.Range(0, Ny).Select(i => Dy[i*Nx])]);
@@ -837,7 +889,7 @@ namespace ReservoirSimulator
                 double[] xCoord,        // Length: Nx + 1 (Nodes)
                 double[] yCoord,        // Length: Ny + 1 (Nodes)
                 double[] zCoord,        // Length: Nz + 1 (Nodes)
-                List<double> time,      // Length: Total timesteps
+                List<double> Time,      // Length: Total timesteps
                 List<double[]> P,       // List of flat cell-centered arrays (length: Nx * Ny * Nz)
                 List<double[]> S)       // List of flat cell-centered arrays (length: Nx * Ny * Nz)
         {
@@ -854,14 +906,14 @@ namespace ReservoirSimulator
             pvdSb.AppendLine("<VTKFile type=\"Collection\" version=\"0.1\" byte_order=\"LittleEndian\">");
             pvdSb.AppendLine("  <Collection>");
 
-            double delt = time.Last()/1000;
-
+            int Nt = (int)(Time.Last()/20);
+            double delt = Time.Last()/Nt;
             for (int framenum = 0; framenum <= 1000; framenum++)
             {
                 double t = framenum*delt;
                 double currentTime = t;
-                double[] cellS = interpa(time, S, t);
-                double[] cellP = interpa(time, P, t);
+                double[] cellS = interpa(Time, S, t);
+                double[] cellP = interpa(Time, P, t);
 
                 // Unique filename for each timestep's grid data in the same directory
                 string vtrFileName = $"{caseName}Time{framenum}.vtr";
@@ -1020,6 +1072,182 @@ namespace ReservoirSimulator
             writer.WriteLine("FIELD FieldData 1");
             writer.WriteLine($"WellID 1 {wellName.Length} string");
             writer.WriteLine(wellName);
+        }
+
+
+        // 1. Generates the individual active mesh snapshot for a specific time step
+        public void ExportStepToVtu(
+            string directoryPath, string baseName, int stepIndex,
+            int nx, int ny, int nz, double[] dx, double[] dy, double[] dz, double[] zTop,
+            int[] Actnum, double[] pressure, double[] saturation)
+        {
+            // Build the specific filename for this step (e.g., RunTest1_0.vtu)
+            string fileName = $"{baseName}_{stepIndex}.vtu";
+            string fullPath = Path.Combine(directoryPath, fileName);
+
+            // 2. Compute explicit structural coordinates for vertices
+            // A regular mesh has (nx+1)*(ny+1)*(nz+1) absolute grid vertex coordinates
+            double[] xCoords = new double[nx + 1], yCoords = new double[ny + 1];
+
+            for (int i = 1; i <= nx; i++) xCoords[i] = xCoords[i - 1] + dx[i - 1];
+            for (int j = 1; j <= ny; j++) yCoords[j] = yCoords[j - 1] + dy[j - 1];
+
+            StringBuilder xmlPoints = new(), xmlConnectivity = new(), xmlOffsets = new();
+            StringBuilder xmlTypes = new(), xmlPressure = new(), xmlSaturation = new();
+
+            int pointOffset = 0;
+            int Ngrids = pressure.Length;
+            int numActiveCells = Actnum.Where(a => a > 0).Count();
+            int numPoints = numActiveCells*8; 
+            for (int m = 0; m < Ngrids; m++)
+            {
+                if (Actnum[m] == 0) continue;
+                // Unroll 1D index to 3D matrix indexes
+                int k = m / (nx * ny);
+                int remainder = m % (nx * ny);
+                int j = remainder / nx;
+                int i = remainder % nx;
+
+                // Define block depth levels based on your zTop structure
+                if (Zcorn is null)
+                {
+                    double zUpper = zTop[j * nx + i] + (k * dz[m]);
+                    double zLower = zUpper + dz[m];
+
+                    // Extract the 8 structural corner points for a Hexahedron matching VTK specifications
+                    // Bottom plane points (Z-Upper)
+                    xmlPoints.AppendLine($"{xCoords[i]} {yCoords[j]} {zUpper}");     // Point 0
+                    xmlPoints.AppendLine($"{xCoords[i+1]} {yCoords[j]} {zUpper}");   // Point 1
+                    xmlPoints.AppendLine($"{xCoords[i+1]} {yCoords[j+1]} {zUpper}"); // Point 2
+                    xmlPoints.AppendLine($"{xCoords[i]} {yCoords[j+1]} {zUpper}");   // Point 3
+                                                                                     // Top plane points (Z-Lower)
+                    xmlPoints.AppendLine($"{xCoords[i]} {yCoords[j]} {zLower}");     // Point 4
+                    xmlPoints.AppendLine($"{xCoords[i+1]} {yCoords[j]} {zLower}");   // Point 5
+                    xmlPoints.AppendLine($"{xCoords[i+1]} {yCoords[j+1]} {zLower}"); // Point 6
+                    xmlPoints.AppendLine($"{xCoords[i]} {yCoords[j+1]} {zLower}");   // Point 7
+                }
+                else
+                {
+                    for (int c = 0; c < 8; c++)
+                    {
+                        double z = GetZcornValue(Zcorn, nx, ny, nz, i, j, k, c);
+                        int pstride = 6, pindex = (j * (nx + 1) + i) * pstride;
+                        double x1 = Coord[pindex + 0], y1 = Coord[pindex + 1], z1 = Coord[pindex + 2];
+                        double x2 = Coord[pindex + 3], y2 = Coord[pindex + 4], z2 = Coord[pindex + 5];
+                        double f = (z - z1) / (z2 - z1);
+                        xmlPoints.AppendLine($"{x1 + f * (x2 - x1)} {y1 + f * (y2 - y1)} {z}");     // Point c
+                    }
+                }
+
+                // Hexahedron connectivity mapping string index pointers
+                xmlConnectivity.AppendLine($"{pointOffset} {pointOffset+1} {pointOffset+2} {pointOffset+3} {pointOffset+4} {pointOffset+5} {pointOffset+6} {pointOffset+7}");
+
+                pointOffset += 8;
+                xmlOffsets.AppendLine($"{pointOffset}");
+                xmlTypes.AppendLine("12"); // VTK_HEXAHEDRON structural code identifier
+
+                // Map data properties directly using the corresponding active global identifier
+                xmlPressure.Append($"{pressure[m]} ");
+                xmlSaturation.Append($"{saturation[m]} ");
+            }
+
+            // 3. Assemble complete XML output file buffer
+            StringBuilder vtuFile = new();
+            vtuFile.AppendLine("<?xml version=\"1.0\"?>");
+            vtuFile.AppendLine("<VTKFile type=\"UnstructuredGrid\" version=\"0.1\" byte_order=\"LittleEndian\">");
+            vtuFile.AppendLine($"  <UnstructuredGrid>");
+            vtuFile.AppendLine($"    <Piece NumberOfPoints=\"{numPoints}\" NumberOfCells=\"{numActiveCells}\">");
+
+            // Point Data Section
+            vtuFile.AppendLine("      <Points>");
+            vtuFile.AppendLine("        <DataArray type=\"Float64\" NumberOfComponents=\"3\" format=\"ascii\">");
+            vtuFile.Append(xmlPoints.ToString());
+            vtuFile.AppendLine("        </DataArray>");
+            vtuFile.AppendLine("      </Points>");
+
+            // Cell Connectivity Specification Section
+            vtuFile.AppendLine("      <Cells>");
+            vtuFile.AppendLine("        <DataArray type=\"Int32\" Name=\"connectivity\" format=\"ascii\">");
+            vtuFile.Append(xmlConnectivity.ToString());
+            vtuFile.AppendLine("        </DataArray>");
+            vtuFile.AppendLine("        <DataArray type=\"Int32\" Name=\"offsets\" format=\"ascii\">");
+            vtuFile.Append(xmlOffsets.ToString());
+            vtuFile.AppendLine("        </DataArray>");
+            vtuFile.AppendLine("        <DataArray type=\"UInt8\" Name=\"types\" format=\"ascii\">");
+            vtuFile.Append(xmlTypes.ToString());
+            vtuFile.AppendLine("        </DataArray>");
+            vtuFile.AppendLine("      </Cells>");
+
+            // Simulation Physical Property Field Section
+            vtuFile.AppendLine("      <CellData Scalars=\"Pressure\">");
+            vtuFile.AppendLine("        <DataArray type=\"Float64\" Name=\"Pressure\" format=\"ascii\">");
+            vtuFile.AppendLine(xmlPressure.ToString());
+            vtuFile.AppendLine("        </DataArray>");
+            vtuFile.AppendLine("        <DataArray type=\"Float64\" Name=\"Water_Saturation\" format=\"ascii\">");
+            vtuFile.AppendLine(xmlSaturation.ToString());
+            vtuFile.AppendLine("        </DataArray>");
+            vtuFile.AppendLine("      </CellData>");
+
+            vtuFile.AppendLine("    </Piece>");
+            vtuFile.AppendLine("  </UnstructuredGrid>");
+            vtuFile.AppendLine("</VTKFile>");
+
+            File.WriteAllText(fullPath, vtuFile.ToString());
+        }
+
+        // 2. Generates the master pointer file that ParaView opens
+        public void ExportParaViewVTU(string outputDirectory)
+        {
+            Directory.CreateDirectory(outputDirectory);
+            DirectoryInfo directory = new DirectoryInfo(outputDirectory);
+            foreach (FileInfo file in directory.EnumerateFiles())
+                file.Delete();
+
+            string baseName = "Test1";
+            StringBuilder pvd = new();
+            pvd.AppendLine("<?xml version=\"1.0\"?>");
+            pvd.AppendLine("<VTKFile type=\"Collection\" version=\"0.1\" byte_order=\"LittleEndian\">");
+            pvd.AppendLine("  <Collection>");
+
+            
+            int Nt = (int)(Time.Last()/20);
+            double delt = Time.Last()/Nt;
+            for (int framenum = 0; framenum <= Nt; framenum++)
+            {
+                double t = framenum*delt;
+                double currentTime = t;
+                double[] cellS = interpa(Time, S, t);
+                double[] cellP = interpa(Time, P, t);
+                ExportStepToVtu(outputDirectory, baseName, framenum, Nx, Ny, Nz, Dx, Dy, Dz, zTop, Actnum, cellP, cellS);
+                // Direct reference matching your exact naming convention
+                string vtuFileName = $"{baseName}_{framenum}.vtu";
+                pvd.AppendLine($"    <DataSet timestep=\"{currentTime}\" group=\"\" part=\"0\" file=\"{vtuFileName}\"/>");
+            }
+
+            pvd.AppendLine("  </Collection>");
+            pvd.AppendLine("</VTKFile>");
+
+            string pvdPath = Path.Combine(outputDirectory, $"{baseName}.pvd");
+            File.WriteAllText(pvdPath, pvd.ToString());
+        }
+
+        public static double GetZcornValue(double[] zcorn, int nx, int ny, int nz,
+                                   int i, int j, int k, int corner)
+        {
+            // Deconstruct the 0-7 corner index into local binary offsets
+            int localX = (corner == 1 || corner == 3 || corner == 5 || corner == 6) ? 1 : 0;
+            int localY = (corner == 2 || corner == 3 || corner == 6 || corner == 7) ? 1 : 0;
+            int localZ = (corner >= 4) ? 1 : 0;
+
+            // Standard ECLIPSE/OPM flat array offset formula
+            int index = (k * 2 * ny * 2 * nx) +
+                        (localZ * ny * 2 * nx) +
+                        (j * 2 * nx) +
+                        (localY * nx * 2) +
+                        (i * 2) +
+                        localX;
+
+            return zcorn[index];
         }
 
     }

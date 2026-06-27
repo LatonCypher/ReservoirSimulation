@@ -1,5 +1,6 @@
 ﻿using EclipseDeckReader;
 using System.Diagnostics;
+using System.Text;
 {
     //// 1. Grid Specifications (10x10x3)
     //int nx = 50, ny = 1, nz = 1;
@@ -136,60 +137,57 @@ using System.Diagnostics;
 
 static int[] ReadActnumFile(string filePath)
 {
-    var intList = new List<int>(8405); // Presize with your expected 41x41x5 grid dimension
-
-    // Read line-by-line to avoid loading giant buffers all at once
-    foreach (string line in File.ReadLines(filePath))
-    {
-        if (string.IsNullOrWhiteSpace(line)) continue;
-
-        ReadOnlySpan<char> span = line.AsSpan().Trim();
-
-        // 1. Strip out the header metadata if present
-        if (span.StartsWith("["))
-        {
-            int closeBracketIdx = span.IndexOf(']');
-            if (closeBracketIdx != -1)
-            {
-                span = span.Slice(closeBracketIdx + 1).Trim();
-            }
-        }
-
-        // 2. Extract elements separated by spaces
-        while (span.Length > 0)
-        {
-            int spaceIdx = span.IndexOf(' ');
-
-            if (spaceIdx == -1)
-            {
-                // Last element on the line
-                if (int.TryParse(span, out int lastVal))
-                {
-                    intList.Add(lastVal);
-                }
-                break;
-            }
-
-            ReadOnlySpan<char> token = span.Slice(0, spaceIdx);
-            if (int.TryParse(token, out int val))
-            {
-                intList.Add(val);
-            }
-
-            // Advance past the processed token and continuous spaces
-            span = span.Slice(spaceIdx + 1).TrimStart();
-        }
-    }
-
-    return intList.ToArray();
+    // Read the entire file as a string
+    string fileContent = File.ReadAllText(filePath);
+    // Split by whitespace, remove empty entries, and convert to an int array
+    int[] numbers = [..fileContent
+        .Split((char[])null, StringSplitOptions.RemoveEmptyEntries)
+        .Select(int.Parse)];
+    return numbers;
 }
+
+{
+
+    //int Nx = 20, Ny = 50, Nz = 5;
+    //double[] x = Linspace(63535, 64535, Nx + 1);
+    //double[] y = Linspace(324367, 326867, Ny + 1);
+    //var (X, Y) = Meshgrid(x, y);
+    //Console.WriteLine($"COORD");
+    //for (int ny = 0; ny < y.Length; ny++)
+    //{
+    //    for (int nx = 0; nx < x.Length; nx++)
+    //    {
+    //        Console.WriteLine($"{X[nx, ny]:F3} {Y[nx, ny]:F3} {3000:F3} {X[nx, ny]:F3} {Y[nx, ny]:F3} {3500:F3}"); 
+    //    }
+    //}
+    //Matrix xc = X - 64035, yc = Y - 325617;
+    //var Z = 3000 - 300*Exp(1e-10*xc.Times(xc) + 1e-12*yc.Times(yc));
+    //double dz = 10;
+
+    //Console.WriteLine($"ZCORN");
+    //for (int nz = 0; nz < Nz; nz++)
+    //{
+    //    for (int ny = 0; ny < Ny; ny++)
+    //    {
+    //        for (int nx = 0; nx < Nx; nx++)
+    //        {
+    //            double[] ztb = [Z[nx, ny] + nz*dz, Z[nx + 1, ny] + nz*dz, Z[nx, ny + 1] + nz*dz, Z[nx + 1, ny + 1] + nz*dz,
+    //                            Z[nx, ny] + (nz + 1)*dz, Z[nx + 1, ny] + (nz + 1)*dz, Z[nx, ny + 1] + (nz + 1)*dz, Z[nx + 1, ny + 1] + (nz + 1)*dz];
+    //            Console.WriteLine(string.Join(" ", ztb.Select(x => x.ToString("F3"))));
+    //        }
+    //    }
+    //}
+}
+
+
+
 {   // Eclipse Style Input
 
     // DIMENS
-    int nx = 46, ny = 100, nz = 5;
+    int nx = 20, ny = 50, nz = 5;
 
     // GRID
-    double[] dx = Repmat(25, nx*ny*nz), dy = Repmat(25, nx*ny*nz),
+    double[] dx = Repmat(50, nx*ny*nz), dy = Repmat(50, nx*ny*nz),
         dz = Repmat(10, nx*ny*nz), zTop = Repmat(0, nx*ny);
     double[] phi = Repmat(0.2, nx * ny * nz),
         perm = Repmat(1000, nx * ny * nz);
@@ -243,16 +241,16 @@ static int[] ReadActnumFile(string filePath)
     double ρo0 = 43.68, ρw0 = 62.43;
 
     // EQUIL     
-    double datum = 0, pdatun = 3000, z_woc = 40, pcwoc = 0;
+    double datum = 0, pdatun = 3000, z_woc = 50, pcwoc = 0;
 
     // WELL
     List<Well> wells =
     [
-        new Well(WellType.Producer, "WP1", 0.5, 0, 1500, 9000, 36, 50, [0,0], [0, 100, 200, 300, 400], lrate:[0, 300, 600, 900, 1200]),
-        new Well(WellType.Producer, "WP2", 0.5, 0, 1500, 9000, 12, 50, [0,0], [0, 100, 200, 300, 400], lrate:[0, 300, 600, 900, 1200]),
-        new Well(WellType.Injector, "WI1", 0.5, 0, 1500, 9000, 17, 10, [4,4], [0, 100, 200, 300, 400], rate:[0, 200, 400, 600, 800]),
-        new Well(WellType.Injector, "WI2", 0.5, 0, 1500, 9000, 36, 90, [0,0], [0, 100, 200, 300, 400], rate:[0, 200, 400, 600, 800]),
-        new Well(WellType.Injector, "WI3", 0.5, 0, 1500, 9000, 12, 90, [0,0], [0, 100, 200, 300, 400], rate:[0, 200, 400, 600, 800]),
+        new Well(WellType.Producer, "WP1", 0.5, 0, 1500, 9000,  4, 26, [0,0], [0, 100, 200, 300, 400], lrate:[0, 300, 600, 900, 1200]),
+        new Well(WellType.Producer, "WP2", 0.5, 0, 1500, 9000, 15, 26, [0,0], [0, 100, 200, 300, 400], lrate:[0, 300, 600, 900, 1200]),
+        new Well(WellType.Injector, "WI1", 0.5, 0, 1500, 9000,  8,  3, [4,4], [0, 100, 200, 300, 400], rate:[0, 400, 800, 1200, 1600]),
+        new Well(WellType.Injector, "WI2", 0.5, 0, 1500, 9000,  5, 43, [4,4], [0, 100, 200, 300, 400], rate:[0, 100, 200, 300, 400]),
+        new Well(WellType.Injector, "WI3", 0.5, 0, 1500, 9000, 16, 43, [4,4], [0, 100, 200, 300, 400], rate:[0, 100, 200, 300, 400]),
     ];
 
     //--AQUID              I1   I2    J1   J2     K1    K2                   FACE          CNCT_EFF
@@ -295,27 +293,18 @@ static int[] ReadActnumFile(string filePath)
     reservoir.Initialize();
     double[] resultTime = Linspace(0, 10000, 2);
 
-
     tic();
     Console.WriteLine("Executing Core Simulation Test Loop...");
     reservoir.Simulate2Phase(resultTime, wells);
     Console.WriteLine($"Simulation completed successfully without crashing in {toc():F2} seconds!");
 
-    wells =
-    [
-        new Well(WellType.Producer, "WP1", 0.5, 0, 1500, 9000, 36, 50, [0,0], [0, 100, 200, 300, 400], lrate:[0, 300, 600, 900, 1200]),
-        new Well(WellType.Producer, "WP2", 0.5, 0, 1500, 9000, 12, 50, [0,0], [0, 100, 200, 300, 400], lrate:[0, 300, 600, 900, 1200]),
-        new Well(WellType.Injector, "WI1", 0.5, 0, 1500, 9000, 17, 10, [4,4], [0, 100, 200, 300, 400], rate:[0, 200, 400, 600, 800]),
-        new Well(WellType.Injector, "WI2", 0.5, 0, 1500, 9000, 36, 90, [0,0], [0, 100, 200, 300, 400], rate:[0, 200, 400, 600, 800]),
-        new Well(WellType.Injector, "WI3", 0.5, 0, 1500, 9000, 12, 90, [0,0], [0, 100, 200, 300, 400], rate:[0, 200, 400, 600, 800]),
-    ];
+    reservoir.ExportParaViewVTR("C:\\Users\\lateef.a.kareem\\Documents\\GitHub\\ReservoirSimulation\\RunTestR");
+    reservoir.ExportWells("C:\\Users\\lateef.a.kareem\\Documents\\GitHub\\ReservoirSimulation\\RunTestR");
 
-    reservoir.ExportParaView("C:\\Users\\lateef.a.kareem\\Documents\\GitHub\\ReservoirSimulation\\RunTest1");
-    reservoir.ExportWells("C:\\Users\\lateef.a.kareem\\Documents\\GitHub\\ReservoirSimulation\\RunTest1");
+
+    reservoir.ExportParaViewVTU("C:\\Users\\lateef.a.kareem\\Documents\\GitHub\\ReservoirSimulation\\RunTestU");
+    reservoir.ExportWells("C:\\Users\\lateef.a.kareem\\Documents\\GitHub\\ReservoirSimulation\\RunTestU");
 }
-
-
-
 
 {
     // 2D - 2Phase
