@@ -1,23 +1,26 @@
-﻿using System.Runtime.CompilerServices;
+﻿using System;
+using System.Runtime.CompilerServices;
 using SepalSolver;
 
 namespace ReservoirSimulator
 {
     [method: MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public struct ADiff<T>(double value, T derivative) where T : struct, IVectorND<T>
+    public readonly struct ADiff<T>(double value, T derivative) where T : struct, IVectorND<T>
     {
-        public double Value = value;
-        public T Derivative = derivative;
+        public readonly double Value = value;
+        public readonly T Derivative = derivative;
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static implicit operator ADiff<T>(double a) => new(a, T.Zero);
 
-        // Negation (-u) -> d(-u) = -du
+        // --- Unary & Negation ---
+
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static ADiff<T> operator -(ADiff<T> a)
             => new(-a.Value, -a.Derivative);
 
-        // Addition (u + v) -> d(u+v) = du + dv
+        // --- Addition ---
+
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static ADiff<T> operator +(ADiff<T> a, ADiff<T> b)
             => new(a.Value + b.Value, a.Derivative + b.Derivative);
@@ -30,7 +33,8 @@ namespace ReservoirSimulator
         public static ADiff<T> operator +(ADiff<T> a, double b)
             => new(a.Value + b, a.Derivative);
 
-        // Subtraction (u - v) -> d(u-v) = du - dv
+        // --- Subtraction ---
+
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static ADiff<T> operator -(ADiff<T> a, ADiff<T> b)
             => new(a.Value - b.Value, a.Derivative - b.Derivative);
@@ -43,7 +47,8 @@ namespace ReservoirSimulator
         public static ADiff<T> operator -(ADiff<T> a, double b)
             => new(a.Value - b, a.Derivative);
 
-        // Multiplication (u * v) -> d(uv) = v*du + u*dv
+        // --- Multiplication ---
+
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static ADiff<T> operator *(ADiff<T> a, ADiff<T> b)
             => new(a.Value * b.Value, (b.Value * a.Derivative) + (a.Value * b.Derivative));
@@ -56,48 +61,57 @@ namespace ReservoirSimulator
         public static ADiff<T> operator *(ADiff<T> a, double b)
             => new(a.Value * b, a.Derivative * b);
 
-        // Division (u / v) -> d(u/v) = (v*du - u*dv) / v^2
+        // --- Division ---
+
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static ADiff<T> operator /(ADiff<T> a, ADiff<T> b)
         {
             double invB = 1.0 / b.Value;
-            double value = a.Value * invB;
-            T derivative = (b.Value * a.Derivative - a.Value * b.Derivative) * (invB * invB);
-            return new(value, derivative);
+            double val = a.Value * invB;
+            T deriv = (a.Derivative - (val * b.Derivative)) * invB;
+            return new(val, deriv);
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static ADiff<T> operator /(double a, ADiff<T> b)
         {
             double invB = 1.0 / b.Value;
-            double value = a * invB;
-            T derivative = (-a * invB * invB) * b.Derivative;
-            return new(value, derivative);
+            double val = a * invB;
+            T deriv = (-val * invB) * b.Derivative;
+            return new(val, deriv);
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static ADiff<T> operator /(ADiff<T> a, double b)
         {
             double invB = 1.0 / b;
-            double value = a.Value * invB;
-            T derivative = a.Derivative * invB;
-            return new(value, derivative);
+            return new(a.Value * invB, a.Derivative * invB);
         }
 
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static bool operator >(ADiff<T> a, ADiff<T> b) 
-            => a.Value > b.Value;
+        // --- Relational Operators ---
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static bool operator <(ADiff<T> a, ADiff<T> b)
-            => a.Value < b.Value;
+        public static bool operator >(ADiff<T> a, ADiff<T> b) => a.Value > b.Value;
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static bool operator <=(ADiff<T> a, ADiff<T> b)
-            => a.Value <= b.Value;
+        public static bool operator <(ADiff<T> a, ADiff<T> b) => a.Value < b.Value;
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static bool operator >=(ADiff<T> a, ADiff<T> b)
-            => a.Value >= b.Value;
+        public static bool operator <=(ADiff<T> a, ADiff<T> b) => a.Value <= b.Value;
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static bool operator >=(ADiff<T> a, ADiff<T> b) => a.Value >= b.Value;
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static bool operator >(ADiff<T> a, double b) => a.Value > b;
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static bool operator <(ADiff<T> a, double b) => a.Value < b;
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static bool operator <=(ADiff<T> a, double b) => a.Value <= b;
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static bool operator >=(ADiff<T> a, double b) => a.Value >= b;
     }
 }
