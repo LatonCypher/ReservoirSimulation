@@ -148,7 +148,7 @@ namespace ReservoirSimulator
                         Pwells_n[i] = Po_n[Wells[i].Perforation_NatIndex.First()];
                         Wells[i].Zref = Z[Wells[i].Perforation_NatIndex.First()];
                         break;
-                    case WellType.Injector:
+                    case WellType.INJECTOR:
                         Pwells_n[i] = Pw_n[Wells[i].Perforation_NatIndex.Last()];
                         Wells[i].Zref = Z[Wells[i].Perforation_NatIndex.Last()];
                         break;
@@ -269,7 +269,7 @@ namespace ReservoirSimulator
                     qwell = xnp1[2*Ngrids + 2*nwell + 1];
                     Res[2*Ngrids + 2*nwell] = qwell;
                     Res[2*Ngrids + 2*nwell + 1] = well.Constraint(time, pwell, qwell);
-                    well.WaterRate = 0; well.OilRate = 0; Zref = well.Zref;
+                    well.Qw = 0; well.Qo = 0; Zref = well.Zref;
                     ADiff water_rate = 0, oil_rate = 0;
                     switch (well.WellType)
                     {
@@ -286,14 +286,14 @@ namespace ReservoirSimulator
                                 WIo = WI*Kro(so_m)/(μo(po_m)*Bo(po_m));
                                 water_rate = (pwell - pw_m - γw(pw_m)*(Zref - Z[m]))*WIw;
                                 oil_rate = (pwell - po_m - γo(po_m)*(Zref - Z[m]))*WIo;
-                                well.WaterRate += water_rate.Value;
-                                well.OilRate += oil_rate.Value;
+                                well.Qw += water_rate.Value;
+                                well.Qo += oil_rate.Value;
                                 Res[indx1] += oil_rate; Res[indx2] += water_rate;
                                 Res[2*Ngrids + 2*nwell] -= oil_rate + water_rate;
                             }
                             break;
 
-                        case WellType.Injector:
+                        case WellType.INJECTOR:
                             foreach (int m in well.Perforation_NatIndex)
                             {
                                 indx1 = 2*m; indx2 = 2*m+1;
@@ -304,7 +304,7 @@ namespace ReservoirSimulator
                                 WI = alpha_well*Sqrt(Kx[m]*Ky[m])*Dz[m]/(Log(re/well.Radius) + well.Skin);
                                 WIw = WI*krw0/(μw(pwell)*Bw(pwell));
                                 water_rate = (pwell - pw_m - γw(pwell)*(Zref - Z[m]))*WIw;
-                                well.WaterRate += water_rate.Value;
+                                well.Qw += water_rate.Value;
                                 Res[indx2] += water_rate;
                                 Res[2*Ngrids + 2*nwell] -= water_rate;
                             }
@@ -425,7 +425,7 @@ namespace ReservoirSimulator
                         }
 
                         // Validate Injector constraints:
-                        if (Wells[n].WellType == WellType.Injector)
+                        if (Wells[n].WellType == WellType.INJECTOR)
                         {
 
                             // switch to BHP control if pressure exceeds fracturing limits
@@ -467,7 +467,7 @@ namespace ReservoirSimulator
 
                     Time.Add(t = tnp1); isComplete = Abs(t - L) < 1e-13;
                     P.Add(Po_n); S.Add(Sw_n); Rate.Add(Qwells_n); Pwf.Add(Pwells_n);
-                    WaterCut.Add([.. Wells.Select(w => w.WaterCut)]);
+                    WaterCut.Add([.. Wells.Select(w => w.Fw)]);
                     SweepEff.Add((Sw_n.Sum() - S[0].Sum())*100/(Ngrids - S[0].Sum()));
                     (ErSo_Bo_n, ErSw_Bw_n) = FluidInGrid(Po_n, Pw_n, So_n, Sw_n);
                     // Adaptive Time-Stepping Logic:

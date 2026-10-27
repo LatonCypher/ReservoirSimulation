@@ -28,29 +28,29 @@ namespace ReservoirSimulator
             Connectivity_Efficiency = connectivity_Efficiency;
             Pa = Pinit;
 
-            if (FlowDirection == FlowDirection.Iminus)
+            if (FlowDirection == FlowDirection.IM)
             {
                 if (Iinterval[0] != Iinterval[1] && Iinterval[0] != 0)
                     throw new ArgumentException("Invalid flow direction for the given I interval.");
             }
-            else if (FlowDirection == FlowDirection.Iplus)
+            else if (FlowDirection == FlowDirection.IP)
             {
                 if (Iinterval[0] != Iinterval[1] && Iinterval[1] >= 0)
                     throw new ArgumentException("Invalid flow direction for the given I interval.");
             }
 
-            if (FlowDirection == FlowDirection.Jminus)
+            if (FlowDirection == FlowDirection.JM)
             {
                 if (Jinterval[0] != Jinterval[1] && Jinterval[0] != 0)
                     throw new ArgumentException("Invalid flow direction for the given J interval.");
             }
-            else if (FlowDirection == FlowDirection.Jplus)
+            else if (FlowDirection == FlowDirection.JP)
             {
                 if (Jinterval[0] != Jinterval[1] && Jinterval[1] >= 0)
                     throw new ArgumentException("Invalid flow direction for the given J interval.");
             }
 
-            if(FlowDirection == FlowDirection.Kminus)
+            if(FlowDirection == FlowDirection.KM)
             {
                 if (Kinterval[0] != Kinterval[1] && Kinterval[0] != 0)
                     throw new ArgumentException("Invalid flow direction for the given K interval.");

@@ -1,8 +1,6 @@
-﻿using SepalSolver;
-using System.Diagnostics.Metrics;
-using System.Numerics;
+﻿using EclipseDeckReader;
+using SepalSolver;
 using System.Text;
-using System.Timers;
 using static ReservoirSimulator.Math;
 
 namespace ReservoirSimulator
@@ -12,23 +10,13 @@ namespace ReservoirSimulator
         public int funcall;
         public List<double[]> P, S, Rate, OilRate, WaterRate, GasRate, Pwf, WaterCut;
         public List<double> Time, SweepEff;
-        readonly Func<ADiff, ADiff> Sws, Swe, Pc_D, Pc_I, Bo, Bw, μo, μw, γo, γw, Kro, Krw, Er;
+        readonly Func<ADiff<Vector2d>, ADiff<Vector2d>> Sws, Swe, Pc_D, Pc_I, Bo, Bw, μo, μw, γo, γw, Kro, Krw, Er;
         // Define conversion constants
         const double alpha = 1.127e-3,        // Darcy to Field units factor
                 beta = 5.615;                 // ft3 to bbl conversion factor
 
-        double Transmissibility(Direction d, int m, int n)
-        {
-            return d switch
-            {
-                Direction.X => alpha * Dy[m] * Dz[m] * Harmmean(Kx[m] / Dx[m], Kx[n] / Dx[n]),
-                Direction.Y => alpha * Dx[m] * Dz[m] * Harmmean(Ky[m] / Dy[m], Ky[n] / Dy[n]),
-                Direction.Z => alpha * Dx[m] * Dy[m] * Harmmean(Kz[m] / Dz[m], Kz[n] / Dz[n]),
-                _ => throw new ArgumentException("Invalid direction"),
-            };
-        }
 
-        ADiff[] ErSo_Bo_np1, ErSw_Bw_np1, Res, xs;
+        double [] xs;
 
         List<double> a_value = [], b = [];
         List<int> a_index = [], a_start = [0];
@@ -50,7 +38,6 @@ namespace ReservoirSimulator
             double f = (x - X[i-1])/(X[i] - X[i-1]);
             return [.. Y[i-1].Zip(Y[i], (a, b) => betweenab(a, b, f))];
         }
-        double Harmmean(double x1, double x2) => 2/(1/x1 + 1/x2);
         (double[] Po, double[] Sw, double[] Pwell, double[] Qwell, double maxDP, double maxDS, int i_p, int i_s) ExtractSolution()
         {
             int indx = 0, i_p = 0, i_s = 0; double maxDp = 0, maxDs = 0;
@@ -60,8 +47,8 @@ namespace ReservoirSimulator
             for (int i = 0; i < Ngrids; i++)
             {
                 if (Actnum[i] == 0) { indx += 2; continue; }
-                Po[i] = xs[indx++].Value; // Matches Po index
-                Sw[i] = xs[indx++].Value; // Matches Sw index
+                Po[i] = xs[indx++]; // Matches Po index
+                Sw[i] = xs[indx++]; // Matches Sw index
                 if (Abs(Po[i] - Po_n[i]) > maxDp)
                 { i_p = i; maxDp = Abs(Po[i] - Po_n[i]); }
                 if (Abs(Sw[i] - Sw_n[i]) > maxDs)
@@ -69,8 +56,8 @@ namespace ReservoirSimulator
             }
             for (int i = 0; i < Nwells; i++)
             {
-                Pwell[i] = xs[indx++].Value; // Matches Pwf index
-                Qwell[i] = xs[indx++].Value; // Matches Q index
+                Pwell[i] = xs[indx++]; // Matches Pwf index
+                Qwell[i] = xs[indx++]; // Matches Q index
             }
             return (Po, Sw, Pwell, Qwell, maxDp, maxDs, i_p, i_s);
         }
@@ -82,20 +69,14 @@ namespace ReservoirSimulator
             for (int i = 0; i < Ngrids; i++)
             {
                 if (Actnum[i] == 0) { indx += 2; continue; }
-                xs[indx++].Value = Po_n[i];                          // Matches Po index
-                if (n >= 2) xs[indx] += omega*(Po_n[i] - P[n-1][i]); // Extrapolation
-                xs[indx++].Value = Sw_n[i];                          // Matches Sw index
+                xs[indx++] = Po_n[i];                                   // Matches Po index
+                if (n >= 2) xs[indx] += omega*(Po_n[i] - P[n-1][i]);    // Extrapolation
+                xs[indx++] = Sw_n[i];                                   // Matches Sw index
             }
             for (int i = 0; i < Nwells; i++)
             {
-                xs[indx++].Value = Pwells_n[i];                        // Matches Pwf index
-                xs[indx++].Value = Wells[i].ConstraintType switch
-                {
-                    ConstraintType.MaxPressure => Qwells_n[i],
-                    ConstraintType.MinPressure => Qwells_n[i],
-                    _ => Wells[i].ComputeRate(dt + Time[n])
-                }; // Matches Q index
-
+                xs[indx++] = Pwells_n[i];                               // Matches Pwf index
+                xs[indx++] = Qwells_n[i];                               // Matches Q index
             }
         }
         double[] LinSolve(List<double> a_value, List<int> a_index, List<int> a_start, List<double> b)
@@ -109,331 +90,133 @@ namespace ReservoirSimulator
         readonly double krw0, kro0, Pb, Prefw, Prefr, Pe, Pw_woc, Sw_r, So_r,
             Bo0, Bw0, Po_woc, Z_woc, co, cw, cr, bo, bw, nw, no, np,
             μo0, μw0, γo0, γw0, P_datum, Z_datum, Pc_max;
-        Grid[] Grids;
-        List<Well> Wells;
+        Grid<Vector2d>[] Grids;
+        List<Well<Vector2d>> Wells;
         Aquifer Aquifer;
         double[,] Trans;
         bool[,] Water_Upstream, Oil_Upstream;
-        int[] Actnum;
+        int[] Actnum, Satnum, Pvtnum;
         List<int> Columns2Delete = [];
-        public OilWaterReservoir(
-            // DIMENS
-            int _nx, int _ny, int _nz,
+        Dictionary<(int, int), EQUILPressureDepth> EquilPVTCombinations = [];
+        EclipseDataDeck DATA;
+        PVTWAnalysis[] PVTWs;
+        PVDOAnalysis[] PVDOs;
+        SWOFAnalysis[] SWOFs;
 
-            // GRID
-            double[] _dx, double[] _dy, double[] _dz, double[] _zTop,
-            double[] _perm, double[] _phi, double _mult_z,
+        public OilWaterReservoir(EclipseDataDeck Data)
+        {
+            DATA = Data;
+            // RUNSPEC
+            Nx = Data.NX; Ny = Data.NY; Nz = Data.NZ; NxNy = Nx * Ny; Ngrids = Nx * Ny * Nz;
+
+            // GRIDS
+            if (Data.DxArray.Count > 0 && Data.DyArray.Count > 0 && Data.DzArray.Count > 0)
+            {
+                Dx = [.. Data.DxArray]; Dy = [.. Data.DyArray]; Dz = [.. Data.DzArray];
+                zTop = Data.ZtopArray.Count > 0 ? [.. Data.ZtopArray] : new double[NxNy];
+            }
+            else { Coord = [.. Data.CoordArray]; Zcorn = [.. Data.ZcornArray]; }
+            Φ = [..Data.PorosityArray]; Kx = [..Data.PermXArray]; Ky = [..Data.PermYArray]; Kz = [..Data.PermZArray];
+            Grids = Zcorn is not null ? Utility.ProcessGrid<Vector2d>(Nx, Ny, Nz, Coord, Zcorn, Φ, Kx, Ky, Kz) :
+                Utility.ProcessGrid<Vector2d>(Nx, Ny, Nz, Dx, Dy, Dz, zTop, Φ, Kx, Ky, Kz);
 
             // PVTW
-            double _pref_w, double _bw0, double _cw, double _μw0, double _bw,
+            PVTWs = [.. Data.RawPvtwTables.Select(pvtw => new PVTWAnalysis(pvtw))];
+            foreach (var pvtw in PVTWs) pvtw.FitProperties();
 
-            // PVDO (Pressure, FVF, Muo) 
-            Matrix _pvdo,
+            // PVDO
+            PVDOs = [..Data.RawPvdoTables.Select(pvdo=>new PVDOAnalysis(pvdo))];
+            foreach (var pvdo in PVDOs) pvdo.FitProperties();
+
+            // SWOF
+            SWOFs = [.. Data.RawSwofTables.Select(swof => new SWOFAnalysis(swof))];
+            foreach (var swof in SWOFs) swof.FitProperties();
 
             // ROCK
-            double _pref_r, double _cr,
+            cr = Data.RockCompressibility; Prefr = Data.RockReferencePressure;
+            Er = P => Exp(cr * (P - Prefr));
 
-            // SWOF (Sw, Krw, Kro, Pcwo)
-            Matrix _swof,
+            // DENSITIES
+            γo0 = Data.SurfaceOilDensity/144; γw0 = Data.SurfaceWaterDensity/144;
 
-            // DENSITY (Oil density, water density) 
-            double _ρo0, double _ρw0,
+            // REGION
 
-            // EQUIL     
-            double _datum, double _pdatun, double _z_woc, double _pcwoc,
+            Utility.SetAcitveGrids(Grids, Data.ActnumArray, Er);
+            Utility.SetSWOF(Grids, Data.SatnumArray, SWOFs);
+            Utility.SetPVDO(Grids, Data.PvtnumArray, PVDOs, γo0); 
+            Utility.SetPVTW(Grids, Data.PvtnumArray, PVTWs, γw0);
 
-            // WELL
-            List<Well> _wells,
+            // TRANSMISSIBILITY
+            Utility.ComputeFaceTransmissibility(Grids);
 
-            // AQUIFER
-            Aquifer _aquifer = null,
-
-            // ACTNUM
-            int[] _actnum = null,
-
-            // COORD
-            double[] _coord = null,
-
-            //
-            double[] _zcorn = null)
-        {
-            ADiff.capacity = 16;
-            Nx = _nx; Ny = _ny; Nz = _nz; NxNy = Nx*Ny; Ngrids = Nx*Ny*Nz;
-            Dx = _dx; Dy = _dy; Dz = _dz; Kx = _perm; Ky = _perm;
-            Kz = [.. _perm.Select(k => k*_mult_z)]; Φ = _phi;
-            Wells = _wells; Aquifer = _aquifer;
-
-            // Extract the Z
-            zTop = _zTop;
-            Z = new double[Ngrids];
-            if (_zTop.Length != NxNy)
-                throw new Exception($"Number of elements in TOPS must be equal to {NxNy}");
-            for (int i = 0; i < NxNy; i++)
-                Z[i] = _zTop[i] + 0.5*Dz[i];
-            for (int i = NxNy; i < Ngrids; i++)
-                Z[i] = Z[i-NxNy] + 0.5*(Dz[i-NxNy] + Dz[i]);
-
-            // Extract PVTW
-            Bw0 = _bw0; μw0 = _μw0; γw0 = _ρw0/144; bw = _bw; cw = _cw;
-            Bw = Pw => Bw0*Exp(-cw*(Pw - Prefw));
-            μw = Pw => μw0*Exp(bw*(Pw - Prefw));
-            γw = Pw => γw0*Exp(cw*(Pw - Prefw));
-
-            // Extract PVDO
-            Pb = double.PositiveInfinity;
-            foreach (var well in Wells)
-                Pb  = Min(Pb, well.MinPressure);
-
-            PVDOAnalysis pvdo = new(_pvdo);
-            var pvdoresult = pvdo.FitPvdoProperties(Pb);
-            Bo0 = pvdoresult.BoAtPRef;
-            μo0 = pvdoresult.ViscosityAtPRef;
-            γo0 = _ρo0/144;
-            co = pvdoresult.ConstantCompressibility;
-            bo = pvdoresult.ViscosityExponent;
-            Bo = Po => Bo0*Exp(-co*(Po - Pb));
-            μo = Po => μo0*Exp(bo*(Po - Pb));
-            γo = Po => γo0*Exp(co*(Po - Pb));
-
-
-            // Extract SWOF
-            SWOFAnalysis swof = new(_swof);
-            var pcresult = swof.FitBrooksCoreyPc();
-            var krresult = swof.FitCoreyPermeability();
-            Pe = pcresult.Pd; np = pcresult.Lambda; Sw_r = pcresult.Swi;
-            So_r = krresult.Sor; kro0 = krresult.KroEndpoint;
-            krw0 = krresult.KrwEndpoint; no = krresult.No; nw = krresult.Nw;
-            Pc_max = 150; 
-
-            Sws = Sw => (Sw - Sw_r)/(1 - Sw_r);
-            Swe = Sw => (Sw - Sw_r)/(1 - Sw_r - So_r);
-            Pc_D = Sw => Pe <= 1e-12 ? 0.0 :
-                    Sw <= Sw_r ? Pc_max :
-                    Sw >= (1.0 - So_r) ? Pe :
-                    Pe * Pow(Sws(Sw), -1.0 / np);
-            Pc_I = Sw => Pe <= 1e-12 ? 0.0 :
-                    Sw <= Sw_r ? Pc_max :
-                    Sw >= 1.0 ? 0.0 :
-                    Pe * (Pow(Swe(Sw), -1.0 / np) - 1.0);
-            Kro = So => So <= So_r ? 0 : kro0 * Pow(1 - Swe(1 - So), no);
-            Krw = Sw => Sw <= Sw_r ? 0 : krw0 * Pow(Swe(Sw), nw);
-
-            //Extract ROCK
-            cr = _cr; Prefr = _pref_r;
-            Er = P => Exp(cr*(P - Prefr));
-
-            // Extract datum
-            Z_woc = _z_woc; P_datum = _pdatun; Z_datum = _datum;
-            if (_datum < _z_woc)
+            // EQUIL
+            EQUILAnalysis[] EQUILs = [.. Data.RawEquilTables.Select(equil => new EQUILAnalysis(equil))];
+            double MaxZ = Grids.Max(grid => grid.Center.Z), MinZ = Grids.Min(grid => grid.Center.Z);
+            for(int e = 0; e < EQUILs.Length; e++)
             {
-                Po_woc = P_datum + γo(P_datum).Value*(Z_woc - Z_datum);
-                Pw_woc = Po_woc - Pe;
-            }
-            else
-            {
-                Pw_woc = P_datum + γw(P_datum).Value*(Z_woc - Z_datum);
-                Po_woc = Pw_woc + Pe;
-            }
-            Wells = _wells; Nwells = Wells.Count; varNum = 2*Ngrids + 2*Nwells;
-            Aquifer = _aquifer;
-            Actnum = _actnum is not null? _actnum:[.. Enumerable.Repeat(1, Ngrids)];
-            Grids = Zcorn is not null ? ProcessGrid(Coord, Zcorn) : ProcessGrid(Nx, Ny, Nz, Dx, Dy, Dz, zTop);
-            PoreVolume = [.. Grids.Select(g => g.PoreVolume)];
-
-        }
-
-        private Grid[] ProcessGrid(double[] coord, double[] zcorn)
-        {
-            
-        }
-        private Grid[] ProcessGrid(int nx, int ny, int nz, double[] dx, double[] dy, double[] dz, double[] zTop, double[] Φ, double[] permx, double[] permy, double[] permz)
-        {
-            Grids = new Grid[Ngrids];
-            for (int m = 0; m < Ngrids; m++)
-            {
-                int k = m / NxNy, rem = m % NxNy, j = rem / Nx, i = rem % Nx;
-                Grids[m] = new Grid
+                for (int p = 0; p < PVDOs.Length; p++)
                 {
-                    Indices = [.. Enumerable.Range(0, 8)],
-                    NTG = 1.0,
-                    Porosity = Φ[m],
-                    Volume = Dx[m] * Dy[m] * Dz[m],
-                    PoreVolume = Dx[m] * Dy[m] * Dz[m] * Φ[m] / beta,
-                    Corners = new Vector3[8]
-                };
-                double zUpper = zTop[j * Nx + i] + (k * Dz[m]);
-                double zLower = zUpper + Dz[m];
+                    var equil = EQUILs[e]; var pvdo = PVDOs[p]; var pvtw = PVTWs[p];
+                    double BoAtPref = pvdo.Result.BoAtPref, BwAtPref = pvtw.Result.BwAtPref;
+                    double Co = pvdo.Result.Co, Cw = pvtw.Result.Cw;
+                    double PRefo = pvdo.Result.PRef, PRefw = pvtw.Result.PRef;
+                    Func<double, double> γo = P => γo0 / (BoAtPref * Exp(-Co * (P - PRefo))), 
+                                         γw = P => γw0 / (BwAtPref * Exp(-Cw * (P - PRefw)));
+                    var equildata = new EQUILPressureDepth(equil.Result);
+                    int N = (int)(Abs(equildata.ZDatum - equildata.ZWOC) / (MaxZ - MinZ) * Nz * 10);
+                    if (equildata.ZDatum < equildata.ZWOC)
+                    {
+                        var oil2WOC = Utility.IntegrateLegRK4(equildata.ZDatum, equildata.PDatum, equildata.ZWOC, N, γo);
+                        equildata.PoWOC = oil2WOC.Last().P; equildata.PwWOC = equildata.PoWOC - equildata.PcWOC;
+                    }
+                    else
+                    {
+                        var water2WOC = Utility.IntegrateLegRK4(equil.ZDatum, equil.PDatum, equildata.ZWOC, N, γw);
+                        equildata.PwWOC = water2WOC.Last().P; equildata.PoWOC = equildata.PwWOC + equildata.PcWOC;
+                    }
+                    N = (int)(Abs(MinZ - equildata.ZWOC) / (MaxZ - MinZ) * Nz * 10);
+                    var OilPressureHeight1 = Utility.IntegrateLegRK4(equildata.ZWOC, equildata.PoWOC, MinZ, N, γo);
+                    var WaterPressureHeight1 = Utility.IntegrateLegRK4(equildata.ZWOC, equildata.PwWOC, MinZ, N, γw);
+                    OilPressureHeight1.Reverse(); equildata.OilZonePressureDepthPairs.AddRange(OilPressureHeight1);
+                    WaterPressureHeight1.Reverse(); equildata.WaterZonePressureDepthPairs.AddRange(WaterPressureHeight1);
 
-                // Extract the 8 structural corner points for a Hexahedron matching VTK specifications
-                // Bottom plane points (Z-Upper)
-                Grids[m].Corners[0] = new Vector3(xCoords[i], yCoords[j], zUpper);     // Point 0
-                xmlPoints.AppendLine($"{xCoords[i+1]} {yCoords[j]} {zUpper}");   // Point 1
-                xmlPoints.AppendLine($"{xCoords[i+1]} {yCoords[j+1]} {zUpper}"); // Point 2
-                xmlPoints.AppendLine($"{xCoords[i]} {yCoords[j+1]} {zUpper}");   // Point 3
-                                                                                 // Top plane points (Z-Lower)
-                xmlPoints.AppendLine($"{xCoords[i]} {yCoords[j]} {zLower}");     // Point 4
-                xmlPoints.AppendLine($"{xCoords[i+1]} {yCoords[j]} {zLower}");   // Point 5
-                xmlPoints.AppendLine($"{xCoords[i+1]} {yCoords[j+1]} {zLower}"); // Point 6
-                xmlPoints.AppendLine($"{xCoords[i]} {yCoords[j+1]} {zLower}");   // Point 7
+                    N = (int)(Abs(MaxZ - equildata.ZWOC) / (MaxZ - MinZ) * Nz * 10);
+                    var WaterPressureHeight2 = Utility.IntegrateLegRK4(equildata.ZWOC, equildata.PwWOC, MinZ, N, γw);
+                    equildata.WaterZonePressureDepthPairs.AddRange(WaterPressureHeight2[1..]);
+                    equildata.OilZonePressureDepthPairs.AddRange(WaterPressureHeight2[1..].
+                        Select(pair => new PressureDepthPair(pair.Z, pair.P + equildata.PcWOC)));
+
+                    EquilPVTCombinations[(e, p)] = equildata;
+                }
             }
-            return Grids;
-        }
-
-        public OilWaterReservoir(int _nx, int _ny, int _nz,
-            double[] _perm, double[] _phi, double[] _dx, double[] _dy,
-            double[] _dz, double[] _z, double _peow, double _pw_woc,
-            double _z_woc, double _mult_z, double _sw_r, double _so_r,
-            double _bo0, double _bw0, double _μo0, double _μw0, double _γo0,
-            double _γw0, double _krw0, double _kro0, double _co, double _cw,
-            double _cr, double _bo, double _bw, double _nw, double _no,
-            double _pb, double _pref, List<Well> _wells, Aquifer _aquifer = null, int[] _actnum = null)
-        {
-            ADiff.capacity = 16;
-            Kx = _perm; Ky = _perm; Kz = [.. _perm.Select(k => k*_mult_z)];
-            Nx = _nx; Ny = _ny; Nz = _nz; NxNy = Nx*Ny; Ngrids = Nx*Ny*Nz;
-            Dx = _dx; Dy = _dy; Dz = _dz; Z = _z; Φ = _phi; kro0 = _kro0;
-            krw0 = _krw0; Bo0 = _bo0; Bw0 = _bw0; Pb = _pb; Prefw = _pref;
-            Prefr = _pref; Pe = _peow; So_r = _so_r; Sw_r = _sw_r; co = _co;
-            cw = _cw; cr = _cr; bo = _bo; bw = _bw; no = _no; nw = _nw;
-            np = 0.7; μo0 = _μo0; μw0 = _μw0; γo0 = _γo0; γw0 = _γw0;
-            Pw_woc = _pw_woc; Po_woc = Pw_woc + Pe; Z_woc = _z_woc;
-            Wells = _wells; Nwells = Wells.Count; varNum = 2*Ngrids + 2*Nwells;
-            Aquifer = _aquifer;
-            Actnum = _actnum is not null ? _actnum : [.. Enumerable.Repeat(1, Ngrids)];
-            PoreVolume = [.. Enumerable.Range(0, Ngrids).Select(i => Dx[i]*Dy[i]*Dz[i]*Φ[i]/beta)];
-
-
-            Sws = Sw => (Sw - Sw_r)/(1 - Sw_r);
-            Swe = Sw => (Sw - Sw_r)/(1 - Sw_r - So_r);
-            Pc_D = Sw => Pe <= 1e-12 ? 0.0 :
-                Sw <= Sw_r ? Pc_max :
-                Sw >= (1.0 - So_r) ? Pe :
-                Pe * Pow(Sws(Sw), -1.0 / np);
-            Pc_I = Sw => Pe <= 1e-12 ? 0.0 :
-                Sw <= Sw_r ? Pc_max :
-                Sw >= 1.0 ? 0.0 :
-                Pe * (Pow(Swe(Sw), -1.0 / np) - 1.0);
-            Bo = Po => Bo0*Exp(-co*(Po - Pb));
-            Bw = Pw => Bw0*Exp(-cw*(Pw - Prefw));
-            μo = Po => μo0*Exp(bo*(Po - Pb));
-            μw = Pw => μw0*Exp(bw*(Pw - Prefw));
-            γo = Po => γo0*Exp(co*(Po - Pb));
-            γw = Pw => γw0*Exp(cw*(Pw - Prefw));
-            Er = P => Exp(cr*(P - Prefr));
-            Krw = Sw => Sw <= Sw_r ? 0 : Sw > 1 - So_r ? krw0 : krw0 * Pow(Swe(Sw), nw);
-            Kro = So => So <= So_r ? 0 : So > 1 - Sw_r ? kro0 : kro0 * Pow(1 - Swe(1 - So), no);
         }
 
         public void Initialize()
         {
             funcall = 0;
-
-            // 2. Initialize the spatial grid blocks
-            Pw_n = [..Enumerable.Repeat(double.NaN, Ngrids)]; 
-            Sw_n = [.. Enumerable.Repeat(double.NaN, Ngrids)];
-            Po_n = [.. Enumerable.Repeat(double.NaN, Ngrids)]; 
-            So_n = [.. Enumerable.Repeat(double.NaN, Ngrids)];
-            ErSo_Bo_n = [.. Enumerable.Repeat(double.NaN, Ngrids)]; 
-            ErSw_Bw_n = [.. Enumerable.Repeat(double.NaN, Ngrids)];
-            ErSo_Bo_np1 = new ADiff[Ngrids]; ErSw_Bw_np1 = new ADiff[Ngrids];
-            Res = new ADiff[varNum]; xs = new ADiff[varNum];
-
-            if (Pe == 0)
+            for (int m = 0; m < Ngrids; m++)
             {
-                for (int i = 0; i < Ngrids; i++)
-                {
-                    if (Actnum[i] == 0)
-                    {
-                        Columns2Delete.Add(2*i);
-                        Columns2Delete.Add(2*i + 1);
-                        continue;
-                    }
+                var grid = Grids[m];
+                if(!grid.isActive) continue;
+                int s = DATA.SatnumArray[m], e = DATA.EquinumArray[m], p = DATA.PvtnumArray[m];
 
-                    if (Z[i] < Z_woc)
-                    {
-                        double p = Po_woc + γo(Po_woc).Value * (Z[i] - Z_woc);
-                        Po_n[i] = Po_woc + 0.5*(γo(p) + γo(Po_woc)).Value * (Z[i] - Z_woc);
-                        Pw_n[i] = Po_n[i]; Sw_n[i] = Sw_r;
-                    }
-                    else
-                    {
-                        double p = Pw_woc + γw(Pw_woc).Value * (Z[i] - Z_woc);
-                        Pw_n[i] = Pw_woc + 0.5*(γw(p) + γw(Pw_woc)).Value * (Z[i] - Z_woc);
-                        Po_n[i] = Pw_n[i]; Sw_n[i] = 1;
-                    }
-
-                    So_n[i] = 1.0 - Sw_n[i];
-                    xs[2*i] = new(Po_n[i], 2*i);
-                    xs[2*i+1] = new(Sw_n[i], 2*i+1);
-                    Res[2*i] = new(); Res[2*i+1] = new();
-                    double meanP = So_n[i]*Po_n[i] + Sw_n[i]*Pw_n[i];
-                    ErSo_Bo_n[i] = (Er(meanP) * So_n[i] / Bo(Po_n[i])).Value;
-                    ErSw_Bw_n[i] = (Er(meanP) * Sw_n[i] / Bw(Pw_n[i])).Value;
-                    ErSo_Bo_np1[i] = new(); ErSw_Bw_np1[i] = new();
-                }
-            }
-            else
-            {
-                // 1. Pre-generate a fine lookup table for the inverse Capillary Pressure relationship
-                List<double> Sw_Table = [.. Linspace(1.0-So_r-1e-5, Sw_r+1e-5, 50)];
-                // Calculate Pc for each Sw point in our table
-                List<double> Pc_Table = [.. Sw_Table.Select(s => Pc_D(s).Value)];
-
-                for (int i = 0; i < Ngrids; i++)
-                {
-                    if (Actnum[i] == 0)
-                    {
-                        Columns2Delete.Add(2*i);
-                        Columns2Delete.Add(2*i + 1);
-                        continue;
-                    }
-
-                    Pw_n[i] = Pw_woc + γw(Pw_woc).Value * (Z[i] - Z_woc);
-                    Po_n[i] = Po_woc + γo(Po_woc).Value * (Z[i] - Z_woc);
-                    double pc = Po_n[i] - Pw_n[i];
-
-                    // 3. Directly interpolate saturation instead of using an iterative solver
-                    if (pc > Pc_Table.First() && pc <= Pc_Table.Last())
-                        // interps(List<double> X, List<double> Y, double x)
-                        Sw_n[i] = interps(Pc_Table, Sw_Table, pc);
-                    else if (pc > Pc_Table.Last())
-                        // Capillary pressure exceeds our table limit; clamp to residual water
-                        Sw_n[i] = Sw_r + 1e-5;
-                    else
-                        // Below or at the entry boundary threshold
-                        Sw_n[i] = 1.0;
-
-                    So_n[i] = 1.0 - Sw_n[i];
-                    xs[2*i] = new(Po_n[i], 2*i);
-                    xs[2*i+1] = new(Sw_n[i], 2*i+1);
-                    Res[2*i] = new(); Res[2*i+1] = new();
-                    double meanP = So_n[i]*Po_n[i] + Sw_n[i]*Pw_n[i];
-                    ErSo_Bo_n[i] = (Er(meanP) * So_n[i] / Bo(Po_n[i])).Value;
-                    ErSw_Bw_n[i] = (Er(meanP) * Sw_n[i] / Bw(Pw_n[i])).Value;
-                    ErSo_Bo_np1[i] = new(); ErSw_Bw_np1[i] = new();
-                }
+                var swoftable = SWOFs[s].swofTable;
+                var equildata = EquilPVTCombinations[(e, p)];
+                var oiltable = equildata.OilZonePressureDepthPairs;
+                var watertable = equildata.WaterZonePressureDepthPairs;
+                grid.Po_n = Utility.Interpolate(oiltable, grid.Center.Z, pair => pair.Z, pair => pair.P);
+                grid.Pw_n = Utility.Interpolate(watertable, grid.Center.Z, pair => pair.Z, pair => pair.P);
+                double pc = grid.Po_n - grid.Pw_n;
+                if (pc == 0)
+                    grid.Sw_n = grid.Center.Z < equildata.ZWOC ? swoftable.Min(swof => swof.Sw) : swoftable.Max(swof => swof.Sw);
+                else grid.Sw_n = Utility.Interpolate(swoftable, pc, swof => swof.Pc, swof => swof.Sw);
+                grid.So_n = 1 - grid.Sw_n;
             }
 
-            Pwells_n = new double[Nwells]; Qwells_n = new double[Nwells];
-            for (int i = 0; i < Nwells; i++)
+            foreach (var well in Wells)
             {
-                Qwells_n[i] = 0; // Start with no flow
-                Wells[i].ComputeNaturalIndex(Nx, Ny);
-                Wells[i].ComputeProductivityIndex(Kx, Ky, Dx, Dy, Dz);
-                switch (Wells[i].WellType)
-                {
-                    case WellType.Producer:
-                        Pwells_n[i] = Po_n[Wells[i].Perforation_NatIndex.First()];
-                        Wells[i].Zref = Z[Wells[i].Perforation_NatIndex.First()];
-                        break;
-                    case WellType.Injector:
-                        Pwells_n[i] = Pw_n[Wells[i].Perforation_NatIndex.Last()];
-                        Wells[i].Zref = Z[Wells[i].Perforation_NatIndex.Last()];
-                        break;
-                }
-                xs[2*Ngrids + 2*i] = new(Pwells_n[i], 2*Ngrids + 2*i);
-                xs[2*Ngrids + 2*i + 1] = new(Qwells_n[i], 2*Ngrids + 2*i + 1);
-                Res[2*Ngrids + 2*i] = new(); Res[2*Ngrids + 2*i+1] = new();
+                well.ComputeProductivityIndex<Vector2d>(Nx, Ny, Kx, Ky, Grids, DATA.StartDate);
+                well.Zref = 0;
             }
         }
 
@@ -487,13 +270,10 @@ namespace ReservoirSimulator
             return (new_start, new_index, new_value);
         }
 
-        public void Simulate2Phase(double[] ResultTime, List<Well> Wells)
+        public void Simulate2Phase(double[] ResultTime, List<Well<Vector2d>> Wells)
         {
             int Lx = Nx - 1, Ly = Ny - 1, Lz = Nz - 1;
             Direction xDir = Direction.X, yDir = Direction.Y, zDir = Direction.Z;
-            FlowDirection Xminus = FlowDirection.Iminus, Xplus = FlowDirection.Iplus,
-                          Yminus = FlowDirection.Jminus, Yplus = FlowDirection.Jplus,
-                          Zminus = FlowDirection.Kminus, Zplus = FlowDirection.Kplus;
             bool Upstreamlock = false;
             int totalItems = Ngrids;
             int cores = Environment.ProcessorCount;
@@ -502,93 +282,9 @@ namespace ReservoirSimulator
             Water_Upstream = new bool[Ngrids, 6];
             Oil_Upstream = new bool[Ngrids, 6];
 
-            Parallel.For(0, cores, coreId =>
-            {
-                int start = coreId * chunkSize;
-                int end = (coreId == cores - 1) ? totalItems : start + chunkSize;
-
-                // A single core executes this inner sequential loop at absolute maximum hardware speed
-                for (int m = start; m < end; m++)
-                {
-                    int k = m / NxNy, rem = m % NxNy,
-                    j = rem / Nx, i = rem % Nx;
-
-                    // Add fluxes to the residual for this grid block from each of its 6 neighbors
-                    if (i > 0) Trans[m, (int)Xminus] = Transmissibility(xDir, m, m - 1);
-                    if (i < Lx) Trans[m, (int)Xplus] = Transmissibility(xDir, m, m + 1);
-                    if (j > 0) Trans[m, (int)Yminus] = Transmissibility(yDir, m, m - Nx);
-                    if (j < Ly) Trans[m, (int)Yplus] = Transmissibility(yDir, m, m + Nx);
-                    if (k > 0) Trans[m, (int)Zminus] = Transmissibility(zDir, m, m - NxNy);
-                    if (k < Lz) Trans[m, (int)Zplus] = Transmissibility(zDir, m, m + NxNy);
-                }
-            });
-
-            void CheckUpstream(FlowDirection Flowdir, int m, ADiff OilPot, ADiff WaterPot)
-            {
-                Oil_Upstream[m, (int)Flowdir] = OilPot > 0;
-                Water_Upstream[m, (int)Flowdir] = WaterPot > 0;
-            }
-
-            void Residual(ADiff[] xnp1, double time)
+            void Residual(double[] xnp1, double time)
             {
                 funcall++;
-                double WI, Zref; ADiff WIw, WIo, pwell, qwell;
-
-                void AddFluxes(FlowDirection Flowdir, int m, int n)
-                {
-                    if (Actnum[n] == 0) return;
-                    ADiff Po_up, Pw_up, So_up, Sw_up, Tw, To;
-                    double Tr = Trans[m, (int)Flowdir];
-                    int indx1, indx2;
-                    ADiff po_n = xnp1[indx1 = 2*n],
-                        sw_n = xnp1[indx2 = 2*n+1],
-                        pw_n = po_n - Pc_I(sw_n),
-                        so_n = 1 - sw_n,
-                        po_m = xnp1[indx1 = 2*m],
-                        sw_m = xnp1[indx2 = 2*m+1],
-                        pw_m = po_m - Pc_I(sw_m),
-                        so_m = 1 - sw_m,
-                        go_avg = 0.5*(γo(po_m) + γo(po_n)),
-                        gw_avg = 0.5*(γw(pw_m) + γw(pw_n)),
-                        DΦo = po_n - po_m - go_avg * (Z[n] - Z[m]),
-                        DΦw = pw_n - pw_m - gw_avg * (Z[n] - Z[m]);
-
-                    if (!Upstreamlock) CheckUpstream(Flowdir, m, DΦo, DΦw);
-
-                    (Po_up, So_up) = Oil_Upstream[m, (int)Flowdir] ? (po_n, so_n) : (po_m, so_m);
-                    To = Tr*Kro(So_up)/(μo(Po_up)*Bo(Po_up));
-                    Res[indx1] += To* DΦo * dt;
-
-                    (Pw_up, Sw_up) = Water_Upstream[m, (int)Flowdir] ? (pw_n, sw_n) : (pw_m, sw_m);
-                    Tw = Tr*Krw(Sw_up)/(μw(Pw_up)*Bw(Pw_up));
-                    Res[indx2] += Tw* DΦw * dt;
-                }
-
-                void AddAquiferFluxes(FlowDirection Flowdir, int m, double Pa, double Ceff)
-                {
-                    ADiff Tw;
-                    double Tr = Flowdir switch
-                    {
-                        FlowDirection.Iminus => Transmissibility(xDir, m, m),
-                        FlowDirection.Iplus => Transmissibility(xDir, m, m),
-                        FlowDirection.Jminus => Transmissibility(yDir, m, m),
-                        FlowDirection.Jplus => Transmissibility(yDir, m, m),
-                        FlowDirection.Kminus => Transmissibility(zDir, m, m),
-                        FlowDirection.Kplus => Transmissibility(zDir, m, m),
-                        _ => 0
-                    };
-                    int indx1, indx2;
-                    ADiff po_m = xnp1[indx1 = 2*m],
-                        sw_m = xnp1[indx2 = 2*m+1],
-                        pw_m = po_m - Pc_I(sw_m), DP = Pa - pw_m;
-                    Tw = Tr*krw0/(μw(pw_m)*Bw(pw_m));
-                    Res[indx2] += Ceff * Tw * dt * Flowdir switch
-                    {
-                        FlowDirection.Kminus => DP + 0.5*γw(pw_m)*Dz[m],
-                        FlowDirection.Kplus => DP - 0.5*γw(pw_m)*Dz[m],
-                        _ => DP
-                    };
-                }
 
                 //  HIGH CPU USAGE: Batched work gives cores long, uninterrupted calculations
                 Parallel.For(0, cores, coreId =>
@@ -600,9 +296,11 @@ namespace ReservoirSimulator
                     for (int m = start; m < end; m++)
                     {
                         if (Actnum[m] == 0) continue;
+
+
                         int indx1 = 2*m, indx2 = 2*m + 1;
-                        ADiff po_m = xnp1[2*m], sw_m = xnp1[2*m+1],
-                            pw_m = po_m - Pc_I(sw_m), so_m = 1 - sw_m;
+                        ADiff<Vector2d> po_m = xnp1[2*m], sw_m = xnp1[2*m+1],
+                        pw_m = po_m - Pc_I(sw_m), so_m = 1 - sw_m;
                         var meanP = so_m*po_m + sw_m*pw_m;
                         ErSo_Bo_np1[m] = Er(meanP)*so_m/Bo(po_m);
                         ErSw_Bw_np1[m] = Er(meanP)*sw_m/Bw(pw_m);
@@ -637,7 +335,8 @@ namespace ReservoirSimulator
                     pwell = xnp1[2*Ngrids + 2*nwell];
                     qwell = xnp1[2*Ngrids + 2*nwell + 1];
                     Res[2*Ngrids + 2*nwell] = qwell*dt;
-                    well.WaterRate = 0; well.OilRate = 0; Zref = well.Zref;
+                    Res[2 * Ngrids + 2 * nwell + 1] = well.Constraint(time, pwell, qwell);
+                    well.Qw = 0; well.Qo = 0; Zref = well.Zref;
                     ADiff water_rate = 0, oil_rate = 0;
                     switch (well.WellType)
                     {
@@ -656,19 +355,19 @@ namespace ReservoirSimulator
 
                                 WIo = WI*Kro(so_m)/(μo(po_m)*Bo(po_m));
                                 oil_rate = DΦo*WIo;
-                                well.OilRate += oil_rate.Value;
+                                well.Qo += oil_rate.Value;
                                 Res[indx1] += oil_rate*dt;
                                 Res[2*Ngrids + 2*nwell] -= oil_rate*dt;
 
                                 WIw = WI*Krw(sw_m)/(μw(pw_m)*Bw(pw_m));
                                 water_rate = DΦw*WIw;
-                                well.WaterRate += water_rate.Value;
+                                well.Qw += water_rate.Value;
                                 Res[indx2] += water_rate*dt;
                                 Res[2*Ngrids + 2*nwell] -= water_rate*dt;
                             }
                             break;
 
-                        case WellType.Injector:
+                        case WellType.INJECTOR:
                             foreach (int m in well.Perforation_NatIndex)
                             {
                                 if (Actnum[m] == 0) continue;
@@ -681,13 +380,12 @@ namespace ReservoirSimulator
 
                                 WIw = WI*krw0/(μw(pwell)*Bw(pwell));
                                 water_rate = DΦw*WIw;
-                                well.WaterRate += water_rate.Value;
+                                well.Qw += water_rate.Value;
                                 Res[indx2] += water_rate*dt;
                                 Res[2*Ngrids + 2*nwell] -= water_rate*dt;
                             }
                             break;
                     }
-                    Res[2 * Ngrids + 2 * nwell + 1] = well.Constraint(time, pwell, qwell);
                 }
                 b.Clear(); a_value.Clear();
                 a_index.Clear(); a_start.Clear();
@@ -819,7 +517,7 @@ namespace ReservoirSimulator
                         }
 
                         // Validate Injector constraints:
-                        if (Wells[n].WellType == WellType.Injector)
+                        if (Wells[n].WellType == WellType.INJECTOR)
                         {
 
                             // switch to BHP control if pressure exceeds fracturing limits
@@ -843,7 +541,7 @@ namespace ReservoirSimulator
                     Po_n = Po; Sw_n = Sw; Pwells_n = Pwell; Qwells_n = Qwell;
                     Time.Add(t = tnp1); isComplete = Abs(t - L) < 1e-13;
                     P.Add(Po_n); S.Add(Sw_n); Rate.Add(Qwells_n); Pwf.Add(Pwells_n);
-                    WaterCut.Add([.. Wells.Select(w => w.WaterCut)]);
+                    WaterCut.Add([.. Wells.Select(w => w.Fw)]);
                     SweepEff.Add((Sw_n.Sum() - S[0].Sum())*100/(Ngrids - S[0].Sum()));
                     for (int m = 0; m < Ngrids; m++)
                     {
@@ -1102,42 +800,10 @@ namespace ReservoirSimulator
             for (int m = 0; m < Ngrids; m++)
             {
                 if (Actnum[m] == 0) continue;
-                // Unroll 1D index to 3D matrix indexes
-                int k = m / (nx * ny);
-                int remainder = m % (nx * ny);
-                int j = remainder / nx;
-                int i = remainder % nx;
+                Grid grid = Grids[m];
 
-                // Define block depth levels based on your zTop structure
-                if (Zcorn is null)
-                {
-                    double zUpper = zTop[j * nx + i] + (k * dz[m]);
-                    double zLower = zUpper + dz[m];
-
-                    // Extract the 8 structural corner points for a Hexahedron matching VTK specifications
-                    // Bottom plane points (Z-Upper)
-                    xmlPoints.AppendLine($"{xCoords[i]} {yCoords[j]} {zUpper}");     // Point 0
-                    xmlPoints.AppendLine($"{xCoords[i+1]} {yCoords[j]} {zUpper}");   // Point 1
-                    xmlPoints.AppendLine($"{xCoords[i+1]} {yCoords[j+1]} {zUpper}"); // Point 2
-                    xmlPoints.AppendLine($"{xCoords[i]} {yCoords[j+1]} {zUpper}");   // Point 3
-                                                                                     // Top plane points (Z-Lower)
-                    xmlPoints.AppendLine($"{xCoords[i]} {yCoords[j]} {zLower}");     // Point 4
-                    xmlPoints.AppendLine($"{xCoords[i+1]} {yCoords[j]} {zLower}");   // Point 5
-                    xmlPoints.AppendLine($"{xCoords[i+1]} {yCoords[j+1]} {zLower}"); // Point 6
-                    xmlPoints.AppendLine($"{xCoords[i]} {yCoords[j+1]} {zLower}");   // Point 7
-                }
-                else
-                {
-                    for (int c = 0; c < 8; c++)
-                    {
-                        double z = GetZcornValue(Zcorn, nx, ny, nz, i, j, k, c);
-                        int pstride = 6, pindex = (j * (nx + 1) + i) * pstride;
-                        double x1 = Coord[pindex + 0], y1 = Coord[pindex + 1], z1 = Coord[pindex + 2];
-                        double x2 = Coord[pindex + 3], y2 = Coord[pindex + 4], z2 = Coord[pindex + 5];
-                        double f = (z - z1) / (z2 - z1);
-                        xmlPoints.AppendLine($"{x1 + f * (x2 - x1)} {y1 + f * (y2 - y1)} {z}");     // Point c
-                    }
-                }
+                for (int c = 0; c < 8; c++)
+                    xmlPoints.AppendLine($"{grid.Corners[c].X} {grid.Corners[c].Y} {grid.Corners[c].Z}");     
 
                 // Hexahedron connectivity mapping string index pointers
                 xmlConnectivity.AppendLine($"{pointOffset} {pointOffset+1} {pointOffset+2} {pointOffset+3} {pointOffset+4} {pointOffset+5} {pointOffset+6} {pointOffset+7}");

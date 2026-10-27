@@ -5,15 +5,19 @@
 /// </summary>
 public sealed class FaultRecord
 {
-    public required string FaultName { get; init; }
-    public required string Direction { get; init; } // I, J, or K vertical/horizontal alignment
-    public required double TransmissibilityMultiplier { get; init; }
+    public string FaultName { get; set; } = string.Empty;
 
-    // Bounding grid coordinate box where the fault is active
-    public required int IMin { get; init; }
-    public required int IMax { get; init; }
-    public required int JMin { get; init; }
-    public required int JMax { get; init; }
-    public required int KMin { get; init; }
-    public required int KMax { get; init; }
+    // Face boundaries: I1-I2, J1-J2, K1-K2
+    public int IStart { get; set; }
+    public int IEnd { get; set; }
+    public int JStart { get; set; }
+    public int JEnd { get; set; }
+    public int KStart { get; set; }
+    public int KEnd { get; set; }
+
+    // Orientation Face: 'X', 'Y', or 'Z'
+    public char Face { get; set; }
+
+    // Transmissibility multiplier applied to connection faces (from MULTFLT)
+    public double TransmissibilityMultiplier { get; set; } = 1.0;
 }

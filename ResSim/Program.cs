@@ -1,5 +1,6 @@
 ﻿using EclipseDeckReader;
 using System.Diagnostics;
+using SepalSolver;
 using System.Text;
 {
     //// 1. Grid Specifications (10x10x3)
@@ -87,97 +88,51 @@ using System.Text;
 }
 
 {
-    //// 1. Define the path to your master ECLIPSE file (.DATA or .GRDECL)
-    //// If testing with the Norne deck, point it to your local file path
-    //string masterDeckPath = @"C:\Users\lateef.a.kareem\Documents\GitHub\opm-data\norne\NORNE_ATW2013.DATA";
+    // 1. Define the path to your master ECLIPSE file (.DATA or .GRDECL)
+    // If testing with the Norne deck, point it to your local file path
+    string masterDeckPath = @"C:\Users\lateef.a.kareem\Documents\GitHub\opm-data\norne\NORNE_ATW2013.DATA";
 
-    //Console.WriteLine("==================================================");
-    //Console.WriteLine("        LAUNCHING ECLIPSE INGESTION PIPELINE     ");
-    //Console.WriteLine("==================================================");
+    Console.WriteLine("==================================================");
+    Console.WriteLine("        LAUNCHING ECLIPSE INGESTION PIPELINE     ");
+    Console.WriteLine("==================================================");
 
-    //if (!File.Exists(masterDeckPath))
-    //{
-    //    Console.ForegroundColor = ConsoleColor.Red;
-    //    Console.WriteLine($"[Error] Could not locate file: {masterDeckPath}");
-    //    Console.ResetColor();
-    //    return;
-    //}
+    if (!File.Exists(masterDeckPath))
+    {
+        Console.ForegroundColor = ConsoleColor.Red;
+        Console.WriteLine($"[Error] Could not locate file: {masterDeckPath}");
+        Console.ResetColor();
+        return;
+    }
 
-    //// 2. Initialize your reader and track performance
-    //Stopwatch timer = Stopwatch.StartNew();
+    // 2. Initialize your reader and track performance
+    Stopwatch timer = Stopwatch.StartNew();
+    EclipseDataDeck parsedDeck;
+    try
+    {
+        // 1. Initialize stateless reader tool
+        var reader = new DeckReader();
 
-    //try
-    //{
-    //    DeckReader reader = new();
+        // 2. Load the input deck into memory
+        parsedDeck = reader.LoadDeckFile(masterDeckPath);
 
-    //    Console.WriteLine($"Reading and parsing deck stream...");
-    //    EclipseDataDeck loadedDeck = reader.LoadDeck(masterDeckPath);
+        // 3. Print out the formatted analysis report
+        DeckPrinter.PrintSummary(parsedDeck);
+    }
+    catch (Exception ex)
+    {
+        Console.ForegroundColor = ConsoleColor.Red;
+        Console.WriteLine($"\n[Critical Ingestion Failure]: {ex.Message}");
+        if (ex.InnerException != null)
+            Console.WriteLine($" ↳ Detail: {ex.InnerException.Message}");
+        Console.ResetColor();
+    }
 
-    //    timer.Stop();
-
-    //    // 3. Print out the success metrics and structural logs
-    //    loadedDeck.PrintDeckSummary();
-    //    Console.WriteLine($"\n✓ Core parsing engine finished in: {timer.ElapsedMilliseconds} ms");
-
-    //    // 4. Verification Check: Confirm arrays aren't empty before handing to math loops
-    //    loadedDeck.VerifyArrayIntegrity();
-    //}
-    //catch (Exception ex)
-    //{
-    //    Console.ForegroundColor = ConsoleColor.Red;
-    //    Console.WriteLine($"\n[Critical Ingestion Failure]: {ex.Message}");
-    //    if (ex.InnerException != null)
-    //        Console.WriteLine($" ↳ Detail: {ex.InnerException.Message}");
-    //    Console.ResetColor();
-    //}
-
-    //Console.WriteLine("\nPipeline idle. Press any key to close context window...");
-    //Console.ReadKey();
+    Console.WriteLine("\nPipeline idle. Press any key to close context window...");
 }
 
-static int[] ReadActnumFile(string filePath)
-{
-    // Read the entire file as a string
-    string fileContent = File.ReadAllText(filePath);
-    // Split by whitespace, remove empty entries, and convert to an int array
-    int[] numbers = [..fileContent
-        .Split((char[])null, StringSplitOptions.RemoveEmptyEntries)
-        .Select(int.Parse)];
-    return numbers;
-}
 
-{
 
-    //int Nx = 20, Ny = 50, Nz = 5;
-    //double[] x = Linspace(63535, 64535, Nx + 1);
-    //double[] y = Linspace(324367, 326867, Ny + 1);
-    //var (X, Y) = Meshgrid(x, y);
-    //Console.WriteLine($"COORD");
-    //for (int ny = 0; ny < y.Length; ny++)
-    //{
-    //    for (int nx = 0; nx < x.Length; nx++)
-    //    {
-    //        Console.WriteLine($"{X[nx, ny]:F3} {Y[nx, ny]:F3} {3000:F3} {X[nx, ny]:F3} {Y[nx, ny]:F3} {3500:F3}"); 
-    //    }
-    //}
-    //Matrix xc = X - 64035, yc = Y - 325617;
-    //var Z = 3000 - 300*Exp(1e-10*xc.Times(xc) + 1e-12*yc.Times(yc));
-    //double dz = 10;
 
-    //Console.WriteLine($"ZCORN");
-    //for (int nz = 0; nz < Nz; nz++)
-    //{
-    //    for (int ny = 0; ny < Ny; ny++)
-    //    {
-    //        for (int nx = 0; nx < Nx; nx++)
-    //        {
-    //            double[] ztb = [Z[nx, ny] + nz*dz, Z[nx + 1, ny] + nz*dz, Z[nx, ny + 1] + nz*dz, Z[nx + 1, ny + 1] + nz*dz,
-    //                            Z[nx, ny] + (nz + 1)*dz, Z[nx + 1, ny] + (nz + 1)*dz, Z[nx, ny + 1] + (nz + 1)*dz, Z[nx + 1, ny + 1] + (nz + 1)*dz];
-    //            Console.WriteLine(string.Join(" ", ztb.Select(x => x.ToString("F3"))));
-    //        }
-    //    }
-    //}
-}
 
 
 
@@ -248,9 +203,9 @@ static int[] ReadActnumFile(string filePath)
     [
         new Well(WellType.Producer, "WP1", 0.5, 0, 1500, 9000,  4, 26, [0,0], [0, 100, 200, 300, 400], lrate:[0, 300, 600, 900, 1200]),
         new Well(WellType.Producer, "WP2", 0.5, 0, 1500, 9000, 15, 26, [0,0], [0, 100, 200, 300, 400], lrate:[0, 300, 600, 900, 1200]),
-        new Well(WellType.Injector, "WI1", 0.5, 0, 1500, 9000,  8,  3, [4,4], [0, 100, 200, 300, 400], rate:[0, 400, 800, 1200, 1600]),
-        new Well(WellType.Injector, "WI2", 0.5, 0, 1500, 9000,  5, 43, [4,4], [0, 100, 200, 300, 400], rate:[0, 100, 200, 300, 400]),
-        new Well(WellType.Injector, "WI3", 0.5, 0, 1500, 9000, 16, 43, [4,4], [0, 100, 200, 300, 400], rate:[0, 100, 200, 300, 400]),
+        new Well(WellType.INJECTOR, "WI1", 0.5, 0, 1500, 9000,  8,  3, [4,4], [0, 100, 200, 300, 400], rate:[0, 400, 800, 1200, 1600]),
+        new Well(WellType.INJECTOR, "WI2", 0.5, 0, 1500, 9000,  5, 43, [4,4], [0, 100, 200, 300, 400], rate:[0, 100, 200, 300, 400]),
+        new Well(WellType.INJECTOR, "WI3", 0.5, 0, 1500, 9000, 16, 43, [4,4], [0, 100, 200, 300, 400], rate:[0, 100, 200, 300, 400]),
     ];
 
     //--AQUID              I1   I2    J1   J2     K1    K2                   FACE          CNCT_EFF

@@ -1,138 +1,196 @@
-﻿using static ReservoirSimulator.Math;
+﻿using EclipseDeckReader;
+using SepalSolver;
+using static ReservoirSimulator.Math;
 
 namespace ReservoirSimulator
 {
-    public class Well
+    public class Well<T> where T : struct, IVectorND<T>
     {
         int lastindex = 0, nextindex = 1;
         public string Name { get; }
-        public int[] Perforation_NatIndex { get { return perforation_NatIndex; } }
-        public double[] Perforation_WI { get { return productivity_Index; } }
+        public Phase PreferedPhase { get; set; }
+        public List<int> PerfNatIndex { get; set; } = [];
+        public List<double> Perforation_WI { get; set; } = [];
         public double MinPressure { get; }
         public double MaxPressure { get; }
-        public double ComputeRate(double time)
-        {
-            var (Time, Rate) = ConstraintType switch
-            {
-                ConstraintType.LiqRate => LiqRateProfile,
-                ConstraintType.OilRate => OilRateProfile,
-                ConstraintType.WaterRate => WaterRateProfile,
-                ConstraintType.GasRate => GasRateProfile,
-                ConstraintType.Rate => RateProfile,
-                _ => throw new NotImplementedException()
-            };
 
-            while (nextindex < Time.Count && Time[nextindex] < time)
-                (lastindex, nextindex) = (nextindex, nextindex + 1);
-            double qlast = lastindex > 0 ? Rate[lastindex-1] : 0;
-            double rate = Rate[lastindex], ramp = 1 - Exp(Time[lastindex] - time);
-            return WellType switch
-            {
-                WellType.Producer => -Abs(qlast + ramp*(rate - qlast)),
-                WellType.Injector => Abs(qlast + ramp*(rate - qlast)),
-                _ => 0,
-            };
-        }
-        public double OilRate { get; set; }
-        public double WaterRate { get; set; }
-        public double LiqRate { get { return OilRate + WaterRate; } }
-        public double GasRate { get; set; }
-        public double WaterCut
-        {
-            get
-            {
-                double totalRate = OilRate + WaterRate;
-                return WaterRate*100 / totalRate;
-            }
-        }
-        public double Radius { get; }
-        public double Skin { get; }
+        public double Target_Qo { get; set; }
+        public double Qo { get; set; }
+        public double Target_Qw { get; set; }
+        public double Qw { get; set; }
+        public double Target_Ql { get; set; }
+        public double Ql { get { return Qo + Qw; } }
+        public double Target_Qg { get; set; }
+        public double Qg { get; set; }
+        public double Fw { get{  return Qw*100 / (Qo + Qw); } }
         public double Zref { get; set; }
+        public double ZControl { get; set; }
         public int I { get; }
         public int J { get; }
-        public int[] PerfInterval { get; }
-        public List<double> ProfileTime { get => profileTime; }
-        public ConstraintType ConstraintType { get; set; } = ConstraintType.LiqRate;
+        public int ref_Index { get; set; } 
+        public ConstraintType ConstraintType { get; set; } = ConstraintType.LRATE;
         public WellType WellType { get; set; }
-        public (List<double> Time, List<double> Rate) LiqRateProfile { get; set; }
-        public (List<double> Time, List<double> Rate) RateProfile { get; set; }
-        public (List<double> Time, List<double> Rate) OilRateProfile { get; set; }
-        public (List<double> Time, List<double> Rate) WaterRateProfile { get; set; }
-        public (List<double> Time, List<double> Rate) GasRateProfile { get; set; }
 
+        public int ActiveIndex { get; set; }
+        public double HighestZref { get; set; }
+        public double LowestZref { get; set; }
 
-        int[] perforation_NatIndex;
-        double[] productivity_Index;
-        List<double> profileTime;
+        public int[] Index;
+        public double Pwf_n, Qflow_n;
+        public ADiff<T> Pwf_np1, Qflow_np1;
+        double ResWell, ResCon;
+        IVectorND<T>[] JacResWell, JacResCon;
+        IVectorND<T> JacResWellm, JacResConm;
+        WellData WellData;
 
-
-        public Well(WellType welltype, string name, double radius, double skin, double minPressure, double maxPressure,
-            int i, int j, int[] perfInterval, List<double> time, List<double> orate = null, List<double> wrate = null, 
-            List<double> grate = null, List<double> lrate = null, List<double> rate = null)
+        public Well(WellData welldata)
         {
-            WellType = welltype;
-            Name = name;
-            Radius = radius;
-            Skin = skin;
-            MinPressure = minPressure;
-            MaxPressure = maxPressure;
-            I = i; J = j;
-            PerfInterval = perfInterval;
-            profileTime = time;
-            if (lrate is not null)
-            { LiqRateProfile = (Time: time, Rate: lrate); ConstraintType = ConstraintType.LiqRate; }
-            if (orate is not null)
-            { OilRateProfile = (Time: time, Rate: orate); ConstraintType = ConstraintType.OilRate; }
-            if (wrate is not null)
-            { WaterRateProfile = (Time: time, Rate: wrate); ConstraintType = ConstraintType.WaterRate; }
-            if (grate is not null)
-            { GasRateProfile = (Time: time, Rate: grate); ConstraintType = ConstraintType.GasRate; }
-            if (rate is not null)
-            { RateProfile = (Time: time, Rate: rate); ConstraintType = ConstraintType.Rate; }
+            WellData = welldata;
+            Name = WellData.Specification.WellName;
+            Zref = WellData.Specification.ReferenceDepth;
+            I = WellData.Specification.HeadI;
+            J = WellData.Specification.HeadJ;
+            ref_Index = WellType == WellType.PRODUCER ? int.MaxValue : 0;
         }
 
-        internal void ComputeNaturalIndex(int Nx, int Ny)
+        internal void ComputeProductivityIndex<T>(int Nx, int Ny, double[] Kx, double[] Ky, Grid<T>[] Grids, DateTime Time) where T : struct, IVectorND<T>
         {
-            var rng = Enumerable.Range(PerfInterval[0], PerfInterval[1] - PerfInterval[0] + 1);
-            perforation_NatIndex = [.. rng.Select(k => I + J*Nx + k*Nx*Ny)];
-        }
+            if (WellData.CompletionHistory[0].EffectiveDate > Time) return;
 
-        internal void ComputeProductivityIndex(double[] Kx, double[] Ky, double[] Dx, double[] Dy, double[] Dz)
-        {
-            productivity_Index = new double[PerfInterval[1] - PerfInterval[0] + 1];
-            int i = 0; double alpha_well = 1.127e-3*2*pi;
-            foreach (int m in perforation_NatIndex)
+            PerfNatIndex.Clear(); Perforation_WI.Clear();
+            int m = 0; double alpha_well = 1.127e-3 * 2 * pi;
+            while (Time > WellData.ControlHistory[m].EffectiveDate) m++;
+            var Control = WellData.ControlHistory[m];
+            switch (Control.WellType)
             {
-                double re = 0.28*Hypot(Pow(Ky[m]/Kx[m], 0.25)*Dx[m], Pow(Kx[m]/Ky[m], 0.25)*Dy[m])/
-                    (Pow(Ky[m]/Kx[m], 0.25) + Pow(Kx[m]/Ky[m], 0.25));
-                productivity_Index[i++] = alpha_well*Sqrt(Kx[m]*Ky[m])*Dz[m]/(Log(re/Radius) + Skin);
+                case "PRODUCER":
+                    WellType = WellType.PRODUCER;
+                    ZControl = double.MaxValue;
+                    break;
+                case "INJECTOR":
+                    WellType = WellType.INJECTOR;
+                    ZControl = double.MinValue;
+                    break;
+            }
+            m = 0;
+            while (Time > WellData.CompletionHistory[m].EffectiveDate) m++;
+            var comp = WellData.CompletionHistory[m];
+            double radius = comp.WellBoreDiameter / 2, skin = comp.EffectiveSkin;
+            foreach (int k in Enumerable.Range(comp.KStart, comp.KEnd - comp.KStart + 1))
+            {
+                if (comp.Status != "OPEN") continue;
+                PerfNatIndex.Add(m = I + J * Nx + k * Nx * Ny);
+                var grid = Grids[m]; grid.numWells++;
+
+                switch (Control.WellType)
+                {
+                    case "PRODUCER":
+                        WellType = WellType.PRODUCER;
+                        if (grid.Center.Z > ZControl)
+                        {
+                            ZControl = grid.Center.Z;
+                            Pwf_n = grid.Po_n;
+                        }
+                        break;
+                    case "INJECTOR":
+                        WellType = WellType.INJECTOR;
+                        if (grid.Center.Z < ZControl)
+                        {
+                            ZControl = grid.Center.Z;
+                            Pwf_n = grid.Po_n;
+                        }
+                        break;
+                }
+                double DX = 0, DY = 0, DZ = 0;
+                for (int c = 0; c < 8; c++)
+                {
+                    // Determine local binary topological offsets
+                    double fx = (c == 1 || c == 2 || c == 5 || c == 6) ? 1 : -1;
+                    double fy = (c == 2 || c == 3 || c == 6 || c == 7) ? 1 : -1;
+                    double fz = (c >= 4) ? 1 : -1;
+                    DX += fx * grid.Corners[c].X;
+                    DY += fy * grid.Corners[c].Y;
+                    DZ += fz * grid.Corners[c].Z;
+                }
+                DX /= 4; DY /= 4; DZ /= 4;
+                double re = 0.28 * Hypot(Pow(Ky[m] / Kx[m], 0.25) * DX, Pow(Kx[m] / Ky[m], 0.25) * DY) /
+                                        (Pow(Ky[m] / Kx[m], 0.25)   +   Pow(Kx[m] / Ky[m], 0.25));
+                Perforation_WI.Add(alpha_well * Sqrt(Kx[m] * Ky[m]) * DZ / (Log(re / radius) + skin));
             }
         }
-        internal ADiff Constraint(double time, ADiff Pressure, ADiff Rate)
+
+        internal ADiff<T> Constraint<T>(DateTime Time, ADiff<T> Pressure, ADiff<T> Rate) where T : struct, IVectorND<T>
         {
-            return ConstraintType switch
+            ADiff<T> Cons = 0;
+            int m = 0;
+            Target_Qo = 0; Target_Qw = 0; Target_Qg = 0; Target_Ql = 0;
+            while (WellData.ControlHistory[m].EffectiveDate > Time) m++;
+            var Control = WellData.ControlHistory[m];
+            switch (Control.ControlMode)
             {
-                ConstraintType.MaxPressure => Pressure - MaxPressure,
-                ConstraintType.MinPressure => Pressure - MinPressure,
-                _ => Rate - ComputeRate(time)
-            };
+                case "ORAT":
+                    Target_Qo = -Control.OilRateTarget;
+                    Cons = Rate - Target_Qo;
+                    break;
+                case "WRAT":
+                    Target_Qw = -Control.WaterRateTarget;
+                    Cons = Rate - Target_Qw;
+                    break;
+                case "GRAT":
+                    Target_Qg = -Control.GasRateTarget;
+                    Cons = Rate - Target_Qg;
+                    break;
+                case "LRAT":
+                    Target_Ql = -Control.LiquidRateTarget;
+                    Cons = Rate - Target_Ql;
+                    break;
+                case "RATE":
+                    switch (WellData.Specification.PreferredPhase)
+                    {
+                        case "WATER":
+                            PreferedPhase = Phase.WATER;
+                            Target_Qw = Control.TargetRate;
+                            Cons = Rate - Target_Qw;
+                            break;
+                        case "GAS":
+                            PreferedPhase = Phase.GAS;
+                            Target_Qg = Control.TargetRate;
+                            Cons = Rate - Target_Qg;
+                            break;
+                    }
+                    break;
+                case "BHP":
+                    switch (WellData.Specification.PreferredPhase)
+                    {
+                        case "WATER":
+                            PreferedPhase = Phase.WATER;
+                            Target_Qw = Control.TargetRate;
+                            Cons = Rate - Target_Qw;
+                            break;
+                        case "GAS":
+                            PreferedPhase = Phase.GAS;
+                            Target_Qg = Control.TargetRate;
+                            Cons = Rate - Target_Qg;
+                            break;
+                    }
+                    break;
+            }
+            return Cons;
         }
 
-        internal ADiff Constraint(double time, ADiff Pressure, ADiff Rate, ADiff ConstraintValue)
+        public void ReconcileBHP()
         {
-            return ConstraintType switch
-            {
-                ConstraintType.MaxPressure => ConstraintValue.CopyFrom(Pressure).SubtractInPlace(MaxPressure),
-                ConstraintType.MinPressure => ConstraintValue.CopyFrom(Pressure).SubtractInPlace(MinPressure),
-                _ => ConstraintValue.CopyFrom(Rate).SubtractInPlace(ComputeRate(time)),
-            };
+
         }
 
-        internal double[][] GetTrajectoryCoordinates(double[] xCoords, double[] yCoords, double[] zCoords)
+        internal double[][] GetTrajectoryCoordinates<T>(int Nx, int Ny, int Nz, Grid<T>[] Grids) where T : struct, IVectorND<T>
         {
-            double x1 = xCoords[I] + 0.5*(xCoords[I+1] - xCoords[I]), x2 = x1;
-            double y1 = yCoords[J] + 0.5*(yCoords[J+1] - yCoords[J]), y2 = y1;
-            double z1 = zCoords[0] - 100, z2 = zCoords[PerfInterval[1]+1];
+            var gridTop = Grids[I + J * Nx]; 
+            var center1 = gridTop.Faces.First().Center;  
+            double x1 = center1.X, y1 = center1.Y, z1 = center1.Z - 100;
+            var gridBottom = Grids[I + J * Nx + (Nz - 1) * Nx * Ny];
+            var center2 = gridBottom.Faces.Last().Center;
+            double x2 = center2.X, y2 = center2.Y, z2 = center2.Z;
             double[][] coordinates = [[x1, y1, z1], [x2, y2, z2]];
             return coordinates;
         }

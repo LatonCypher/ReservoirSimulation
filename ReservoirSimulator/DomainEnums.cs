@@ -9,30 +9,36 @@
             new() { Value = [.. Value], Index = [.. Index], Start = [.. Start] };
     }
 
+    public enum WellStatus
+    {
+        OPEN,
+        CLOSED,
+    }
+
     public enum ConstraintType
     {
-        MaxPressure,
-        MinPressure,
-        LiqRate,
-        OilRate,
-        WaterRate,
-        GasRate,
-        Rate
+        MAXP,
+        MINP,
+        LRATE,
+        ORATE,
+        WRATE,
+        GRATE,
+        RATE
     }
 
     public enum WellType
     {
-        Injector,
-        Producer
+        INJECTOR,
+        PRODUCER
     }
 
     public enum Phase
     {
-        Oil,
-        Water,
-        Gas,
-        DisGas,
-        VapOil
+        OIL,
+        WATER,
+        GAS,
+        DISGAS,
+        VAPOIL
     }
 
     public enum Direction
@@ -44,11 +50,11 @@
 
     public enum FlowDirection
     {
-        Iminus,
-        Iplus,
-        Jminus,
-        Jplus,
-        Kminus,
-        Kplus
+        KM,
+        JM,
+        IM,
+        IP,
+        JP,
+        KP
     }
 }

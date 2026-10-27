@@ -1,10 +1,5 @@
-﻿using MKLNET;
-using SepalSolver;
-using System.Drawing;
+﻿using SepalSolver;
 using System.Runtime.CompilerServices;
-using static SepalSolver.Ode;
-using static SepalSolver.Statistics;
-using static System.Runtime.InteropServices.JavaScript.JSType;
 namespace ReservoirSimulator
 {
     internal static class Math
@@ -13,11 +8,55 @@ namespace ReservoirSimulator
         internal const double pi = SepalSolver.Math.pi;
         internal static int DerivativeCapacity = 31;
 
+        public static double Floor(double x) =>
+            SepalSolver.Math.Floor(x);
+
         public static double[] Linspace(double x, double y, int N) =>
             SepalSolver.Math.Linspace(x, y, N);
 
+        public static double Sqr(double x) =>
+            SepalSolver.Math.Sqr(x);
+
+        public static double Sin(double x) =>
+            SepalSolver.Math.Sin(x);
+
+        public static double Cos(double x) =>
+            SepalSolver.Math.Cos(x);
+
+        public static double Tan(double x) =>
+           SepalSolver.Math.Tan(x);
+
+        public static double Asin(double x) =>
+           SepalSolver.Math.Asin(x);
+
+        public static double Acos(double x) =>
+            SepalSolver.Math.Acos(x);
+
+        public static double Atan(double x) =>
+            SepalSolver.Math.Atan(x);
+
+        public static double Sinh(double x) =>
+            SepalSolver.Math.Sinh(x);
+
+        public static double Cosh(double x) =>
+            SepalSolver.Math.Cosh(x);
+
+        public static double Tanh(double x) =>
+            SepalSolver.Math.Tanh(x);
+
+        public static double Asinh(double x) =>
+           SepalSolver.Math.Asinh(x);
+
+        public static double Acosh(double x) =>
+            SepalSolver.Math.Acosh(x);
+
+        public static double Atanh(double x) =>
+            SepalSolver.Math.Atanh(x);
         public static double Sqrt(double x) =>
             SepalSolver.Math.Sqrt(x);
+
+        public static double Cbrt(double x) =>
+            SepalSolver.Math.Pow(x, 1.0/3.0);
 
         public static double Log(double x) =>
             SepalSolver.Math.Log(x);
@@ -39,71 +78,145 @@ namespace ReservoirSimulator
 
         public static double Pow(double x, double y) =>
            SepalSolver.Math.Pow(x, y);
-
-
-        public static double Sqr(double x) => x*x;
-
         public static double Abs(double x) => x >= 0 ? x : -x;
 
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static ADiff Abs(ADiff a) => (a.Value >= 0.0) ? a : -a;
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static ADiff Max(ADiff a, ADiff b) => (a.Value >= b.Value) ? a : b;
+        public static ADiff<T> Abs<T>(ADiff<T> a) where T : struct, IVectorND<T>
+            => (a.Value >= 0.0) ? a : -a;
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static ADiff Min(ADiff a, ADiff b) => (a.Value <= b.Value) ? a : b;
+        public static ADiff<T> Max<T>(ADiff<T> a, ADiff<T> b) where T : struct, IVectorND<T>
+            => (a.Value >= b.Value) ? a : b;
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static ADiff Pow(ADiff a, double b) => new ADiff().AddInPlace(a).PowInPlace(b);
+        public static ADiff<T> Min<T>(ADiff<T> a, ADiff<T> b) where T : struct, IVectorND<T>
+            => (a.Value <= b.Value) ? a : b;
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static ADiff Exp(ADiff a) => new ADiff().AddInPlace(a).ExpInPlace();
+        public static ADiff<T> Pow<T>(ADiff<T> a, double b) where T : struct, IVectorND<T>
+        {
+            double powerVal = Pow(a.Value, b);
+            // Optimizing the derivative evaluation path to minimize redundant Math.Pow calls
+            double derivativeScale = b * Pow(a.Value, b - 1.0);
+            return new ADiff<T>(powerVal, a.Derivative * derivativeScale);
+        }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static ADiff Log(ADiff a) => new ADiff().AddInPlace(a).LogInPlace();
+        public static ADiff<T> Exp<T>(ADiff<T> a) where T : struct, IVectorND<T>
+        {
+            double expVal = Exp(a.Value);
+            return new ADiff<T>(expVal, a.Derivative * expVal);
+        }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static ADiff Sqrt(ADiff a) => new ADiff().AddInPlace(a).SqrtInPlace();
+        public static ADiff<T> Log<T>(ADiff<T> a) where T : struct, IVectorND<T>
+        {
+            double logVal = Log(a.Value);
+            return new ADiff<T>(logVal, a.Derivative / a.Value);
+        }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static ADiff Cbrt(ADiff a) => new ADiff().AddInPlace(a).CbrtInPlace();
+        public static ADiff<T> Sqrt<T>(ADiff<T> a) where T : struct, IVectorND<T>
+        {
+            double sqrtVal = Sqrt(a.Value);
+            return new ADiff<T>(sqrtVal, a.Derivative / (2 * sqrtVal));
+        }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static ADiff Sin(ADiff a) => new ADiff().AddInPlace(a).SinInPlace();
+        public static ADiff<T> Cbrt<T>(ADiff<T> a) where T : struct, IVectorND<T>
+        {
+            double cbrtVal = Cbrt(a.Value);
+            // d(∛u) = du / (3 * ∛u^2)
+            double derivativeScale = 1.0 / (3.0 * (cbrtVal * cbrtVal));
+            return new ADiff<T>(cbrtVal, a.Derivative * derivativeScale);
+        }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static ADiff Cos(ADiff a) => new ADiff().AddInPlace(a).CosInPlace();
+        public static ADiff<T> Sin<T>(ADiff<T> a) where T : struct, IVectorND<T>
+        {
+            // Computing both together if needed, but standard Math calls are heavily optimized by the JIT
+            return new ADiff<T>(Sin(a.Value), a.Derivative * Cos(a.Value));
+        }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static ADiff Tan(ADiff a) => new ADiff().AddInPlace(a).TanInPlace();
+        public static ADiff<T> Cos<T>(ADiff<T> a) where T : struct, IVectorND<T>
+        {
+            return new ADiff<T>(Cos(a.Value), -a.Derivative * Sin(a.Value));
+        }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static ADiff Asin(ADiff a) => new ADiff().AddInPlace(a).AsinInPlace();
+        public static ADiff<T> Tan<T>(ADiff<T> a) where T : struct, IVectorND<T>
+        {
+            double tanVal = Tan(a.Value);
+            double cosVal = Cos(a.Value);
+            // d(tan u) = du / cos^2(u)
+            double derivativeScale = 1.0 / (cosVal * cosVal);
+            return new ADiff<T>(tanVal, a.Derivative * derivativeScale);
+        }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static ADiff Acos(ADiff a) => new ADiff().AddInPlace(a).AcosInPlace();
+        public static ADiff<T> Asin<T>(ADiff<T> a) where T : struct, IVectorND<T>
+        {
+            double scale = 1.0 / Sqrt(1.0 - a.Value * a.Value);
+            return new ADiff<T>(Asin(a.Value), a.Derivative * scale);
+        }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static ADiff Atan(ADiff a) => new ADiff().AddInPlace(a).AtanInPlace();
+        public static ADiff<T> Acos<T>(ADiff<T> a) where T : struct, IVectorND<T>
+        {
+            double scale = -1.0 / Sqrt(1.0 - a.Value * a.Value);
+            return new ADiff<T>(Acos(a.Value), a.Derivative * scale);
+        }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static ADiff Sinh(ADiff a) => new ADiff().AddInPlace(a).SinhInPlace();
+        public static ADiff<T> Atan<T>(ADiff<T> a) where T : struct, IVectorND<T>
+        {
+            double scale = 1.0 / (1.0 + a.Value * a.Value);
+            return new ADiff<T>(Atan(a.Value), a.Derivative * scale);
+        }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static ADiff Cosh(ADiff a) => new ADiff().AddInPlace(a).CoshInPlace();
+        public static ADiff<T> Sinh<T>(ADiff<T> a) where T : struct, IVectorND<T>
+        {
+            return new ADiff<T>(Sinh(a.Value), a.Derivative * Cosh(a.Value));
+        }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static ADiff Tanh(ADiff a) => new ADiff().AddInPlace(a).TanhInPlace();
+        public static ADiff<T> Cosh<T>(ADiff<T> a) where T : struct, IVectorND<T>
+        {
+            return new ADiff<T>(Cosh(a.Value), a.Derivative * Sinh(a.Value));
+        }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static ADiff Asinh(ADiff a) => new ADiff().AddInPlace(a).AsinhInPlace();
+        public static ADiff<T> Tanh<T>(ADiff<T> a) where T : struct, IVectorND<T>
+        {
+            double coshVal = Cosh(a.Value);
+            // d(tanh u) = du / cosh^2(u)
+            double derivativeScale = 1.0 / (coshVal * coshVal);
+            return new ADiff<T>(Tanh(a.Value), a.Derivative * derivativeScale);
+        }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static ADiff Acosh(ADiff a) => new ADiff().AddInPlace(a).AcoshInPlace();
+        public static ADiff<T> Asinh<T>(ADiff<T> a) where T : struct, IVectorND<T>
+        {
+            double scale = 1.0 / Sqrt(a.Value * a.Value + 1.0);
+            return new ADiff<T>(Asinh(a.Value), a.Derivative * scale);
+        }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static ADiff Atanh(ADiff a) => new ADiff().AddInPlace(a).AtanhInPlace();
+        public static ADiff<T> Acosh<T>(ADiff<T> a) where T : struct, IVectorND<T>
+        {
+            double scale = 1.0 / Sqrt(a.Value * a.Value - 1.0);
+            return new ADiff<T>(Acosh(a.Value), a.Derivative * scale);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static ADiff<T> Atanh<T>(ADiff<T> a) where T : struct, IVectorND<T>
+        {
+            double scale = 1.0 / (1.0 - a.Value * a.Value);
+            return new ADiff<T>(Atanh(a.Value), a.Derivative * scale);
+        }
 
         public static double[] Mult(List<double> a_value, List<int> a_index, List<int> a_start, double[] x)
         {

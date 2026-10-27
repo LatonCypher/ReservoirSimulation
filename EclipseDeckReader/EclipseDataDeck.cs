@@ -1,79 +1,69 @@
-﻿namespace EclipseDeckReader;
+﻿using System;
+using System.Collections.Generic;
 
-/// <summary>
-/// Container holding the fully loaded primitive datasets extracted from an ECLIPSE asset model.
-/// </summary>
-public sealed class EclipseDataDeck
+namespace EclipseDeckReader
 {
-    // Grid Domain Dimensions
-    public int Nx { get; set; }
-    public int Ny { get; set; }
-    public int Nz { get; set; }
-    public int Ngrids => Nx * Ny * Nz;
-
-    // Core Structural Geometries (Flat 1D formats)
-    public double[] Coord { get; set; } = [];
-    public double[] Zcorn { get; set; } = [];
-    public int[] Actnum { get; set; } = [];
-
-    // Petrophysical Property Arrays
-    public double[] Porosity { get; set; } = [];
-    public double[] Ntg { get; set; } = [];
-    public double[] PermX { get; set; } = [];
-    public double[] PermY { get; set; } = [];
-    public double[] PermZ { get; set; } = [];
-
-    // Structural Multipliers
-    public List<FaultRecord> Faults { get; } = new();
-
-    public void PrintDeckSummary()
+    public sealed class EclipseDataDeck
     {
-        Console.WriteLine("==================================================");
-        Console.WriteLine("         ECLIPSE DECK INGESTION COMPLETE          ");
-        Console.WriteLine("==================================================");
-        Console.WriteLine($"Grid Dimensions : {Nx} x {Ny} x {Nz} (Total Cells: {Ngrids:N0})");
-        Console.WriteLine($"COORD Entries   : {Coord.Length:N0} (Expected: {6 * (Nx + 1) * (Ny + 1):N0})");
-        Console.WriteLine($"ZCORN Entries   : {Zcorn.Length:N0} (Expected: {8 * Ngrids:N0})");
-        Console.WriteLine($"ACTNUM Entries  : {Actnum.Length:N0}");
-        Console.WriteLine($"NTG Entries     : {Ntg.Length:N0}");
-        Console.WriteLine($"Faults Tracked  : {Faults.Count}");
+        // 1. Grid Dimensions
+        public int NX { get; set; }
+        public int NY { get; set; }
+        public int NZ { get; set; }
 
-        if (Faults.Count > 0)
-        {
-            Console.WriteLine("\nDetected Structural Fault Modifiers:");
-            foreach (var fault in Faults.Take(5))
-            {
-                Console.WriteLine($"  ↳ Fault: '{fault.FaultName}' | Axis: {fault.Direction} | Mult: {fault.TransmissibilityMultiplier}");
-            }
-            if (Faults.Count > 5) Console.WriteLine($"  ↳ ... and {Faults.Count - 5} more faults.");
-        }
-        Console.WriteLine("==================================================");
-    }
+        // 2. Run Control Flags
+        public List<string> PhaseFlags { get; } = [];
 
-    public void VerifyArrayIntegrity()
-    {
-        Console.WriteLine("\nExecuting memory sanity verification checks...");
+        // 3. Flat Spatial Parameter Arrays
+        public List<double> PorosityArray { get; set; } = [];
+        public List<double> PermXArray { get; set; } = [];
+        public List<double> PermYArray { get; set; } = [];
+        public List<double> PermZArray { get; set; } = [];
+        public List<double> NtgArray { get; set; } = [];
+        public List<double> MultXArray { get; set; } = [];
+        public List<double> MultYArray { get; set; } = [];
+        public List<double> MultZArray { get; set; } = [];
+        public List<int> ActnumArray { get; set; } = [];
+        public List<int> SatnumArray { get; set; } = [];
+        public List<int> PvtnumArray { get; set; } = [];
+        public List<int> EquinumArray { get; set; } = []; 
 
-        if (Coord.Length == 0 || Zcorn.Length == 0)
-        {
-            Console.ForegroundColor = ConsoleColor.Yellow;
-            Console.WriteLine("⚠ Warning: Structural layout arrays (COORD/ZCORN) are completely empty.");
-            Console.ResetColor();
-            return;
-        }
+        // 4. Block-Centered Grid Dimension Arrays
+        public List<double> DxArray { get; set; } = [];
+        public List<double> DyArray { get; set; } = [];
+        public List<double> DzArray { get; set; } = [];
+        public List<double> ZtopArray { get; set; } = [];
 
-        // Verify bounds are non-zero
-        Console.WriteLine($" -> Grid footprint: {Nx} x {Ny} x {Nz}");
-        Console.WriteLine($" -> COORD Array Memory Slice: {Coord[0]:F2}, {Coord[1]:F2}, ... [Validated]");
-        Console.WriteLine($" -> ZCORN Array Depth Bound : {Zcorn.Min():F2} ft to {Zcorn.Max():F2} ft [Validated]");
+        // 5. Corner-Point Geometry Coordinates
+        public List<double> CoordArray { get; set; } = [];
+        public List<double> ZcornArray { get; set; } = [];
 
-        if (Ntg.Length > 0)
-            Console.WriteLine($" -> NTG Array Range         : {Ntg.Min():F2} to {Ntg.Max():F2} [Validated]");
-        else
-            Console.WriteLine(" -> NTG Array               : Not specified in this deck file (Defaulting to 1.0 later)");
+        // 6. Surface Fluid Densities
+        public double SurfaceOilDensity { get; set; }
+        public double SurfaceWaterDensity { get; set; }
+        public double SurfaceGasDensity { get; set; }
 
-        Console.ForegroundColor = ConsoleColor.Green;
-        Console.WriteLine("✓ In-memory structures verified as mathematically coherent. Ready for SepalSolver.");
-        Console.ResetColor();
+        // 7. Rock Compressibility Properties
+        public double RockReferencePressure { get; set; }
+        public double RockCompressibility { get; set; }
+
+        // 8. Tabular Fluid, Rock, and Equilibration Data Blocks
+        public List<List<double>> RawPvdoTables { get; } = [];
+        public List<List<double>> RawPvtoTables { get; } = [];
+        public List<List<double>> RawPvdgTables { get; } = [];
+        public List<List<double>> RawPvtgTables { get; } = [];
+        public List<List<double>> RawPvtwTables { get; } = [];
+        public List<List<double>> RawSwofTables { get; } = [];
+        public List<List<double>> RawSgofTables { get; } = [];
+        public List<List<double>> RawEquilTables { get; } = []; 
+
+        // 9. Fault Structures
+        public Dictionary<string, FaultRecord> Faults { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+        // 10. Dynamic Well Networks Block
+        public Dictionary<string, WellData> Wells { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+        // 11. Dynamic Timeline Synchronization State
+        public DateTime StartDate { get; set; }                       // Master baseline anchor point (Day 0)
+        public DateTime CurrentSimDate { get; set; } = DateTime.Now;  // Tracks active day as scheduler advances
     }
 }
