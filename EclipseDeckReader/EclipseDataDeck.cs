@@ -1,5 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
+using Tensorflow.Operations.Initializers;
+using static SepalSolver.Math;
 
 namespace EclipseDeckReader
 {
@@ -25,7 +27,7 @@ namespace EclipseDeckReader
         public List<int> ActnumArray { get; set; } = [];
         public List<int> SatnumArray { get; set; } = [];
         public List<int> PvtnumArray { get; set; } = [];
-        public List<int> EquinumArray { get; set; } = []; 
+        public List<int> EquinumArray { get; set; } = [];
 
         // 4. Block-Centered Grid Dimension Arrays
         public List<double> DxArray { get; set; } = [];

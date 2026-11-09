@@ -55,7 +55,7 @@ namespace EclipseDeckReader
                             if (dim.Count >= 3)
                             {
                                 deck.NX = dim[0]; deck.NY = dim[1]; deck.NZ = dim[2];
-                                InitializeMultiplierArrays(deck);
+                                InitializeArrays(deck);
                             }
                             break;
 
@@ -109,7 +109,7 @@ namespace EclipseDeckReader
 
                         case "ACTNUM":
                             var actData = KeywordExtractor.ExtractIntArray(tokens, ref i);
-                            if (deck.ActnumArray.Count < actData.Count) { deck.ActnumArray = actData; }
+                            deck.ActnumArray = actData; 
                             Console.WriteLine($"      [Data] Current ACTNUM array status: {deck.ActnumArray.Count} entries.");
                             break;
 
@@ -127,17 +127,13 @@ namespace EclipseDeckReader
 
                         case "SATNUM":
                             var satData = KeywordExtractor.ExtractIntArray(tokens, ref i);
-                            // Shift 1-based ECLIPSE pointers to 0-based C# array indices
-                            for (int idx = 0; idx < satData.Count; idx++) { satData[idx] -= 1; }
-                            if (deck.SatnumArray.Count < satData.Count) { deck.SatnumArray = satData; }
+                            deck.SatnumArray = [..satData.Select(s => s - 1)]; 
                             Console.WriteLine($"      [Data] SATNUM: Loaded and converted {deck.SatnumArray.Count} entries to 0-based indexing.");
                             break;
 
                         case "PVTNUM":
                             var pvtData = KeywordExtractor.ExtractIntArray(tokens, ref i);
-                            // Shift 1-based ECLIPSE pointers to 0-based C# array indices
-                            for (int idx = 0; idx < pvtData.Count; idx++) { pvtData[idx] -= 1; }
-                            if (deck.PvtnumArray.Count < pvtData.Count) { deck.PvtnumArray = pvtData; }
+                            deck.PvtnumArray = [..pvtData.Select(p => p - 1)]; 
                             Console.WriteLine($"      [Data] PVTNUM: Loaded and converted {deck.PvtnumArray.Count} entries to 0-based indexing.");
                             break;
 
@@ -200,9 +196,7 @@ namespace EclipseDeckReader
 
                         case "EQUINUM":
                             var equilData = KeywordExtractor.ExtractIntArray(tokens, ref i);
-                            // Shift 1-based ECLIPSE pointers to 0-based C# array indices
-                            for (int idx = 0; idx < equilData.Count; idx++) { equilData[idx] -= 1; }
-                            if (deck.EquinumArray.Count < equilData.Count) { deck.EquinumArray = equilData; }
+                            deck.EquinumArray = [..equilData.Select(e => e - 1)]; 
                             Console.WriteLine($"      [Data] EQUINUM: Loaded and converted {deck.EquinumArray.Count} entries to 0-based indexing.");
                             break;
 
@@ -263,14 +257,19 @@ namespace EclipseDeckReader
             }
         }
 
-        private static void InitializeMultiplierArrays(EclipseDataDeck deck)
+        private static void InitializeArrays(EclipseDataDeck deck)
         {
             int totalCells = deck.NX * deck.NY * deck.NZ;
             if (totalCells <= 0) return;
 
             InitializeUniformArray(deck.MultXArray, totalCells, 1.0);
             InitializeUniformArray(deck.MultYArray, totalCells, 1.0);
-            InitializeUniformArray(deck.MultZArray, totalCells, 1.0);
+            InitializeUniformArray(deck.MultZArray, totalCells, 0.1);
+            InitializeUniformArray(deck.NtgArray, totalCells, 1);
+            InitializeUniformArray(deck.ActnumArray, totalCells, 1);
+            InitializeUniformArray(deck.SatnumArray, totalCells, 0);
+            InitializeUniformArray(deck.PvtnumArray, totalCells, 0);
+            InitializeUniformArray(deck.EquinumArray, totalCells, 0);
             Console.WriteLine($"      [Grid Initialization] MULTX, MULTY, and MULTZ baseline profiles initialized with {totalCells} entries (Default factor = 1.0).");
         }
 
@@ -427,81 +426,7 @@ namespace EclipseDeckReader
                 }
             }
         }
-        private void ParseWconprodBlock(List<Token> tokens, ref int index, EclipseDataDeck deck)
-        {
-            while (index < tokens.Count)
-            {
-                ClearLeadingLayoutSpacers(tokens, ref index);
-                if (index >= tokens.Count || tokens[index].Type == TokenType.Slash) { if (index < tokens.Count) index++; break; }
-
-                string wellName = tokens[index].Content.ToString().Trim('\'').Trim('"');
-                string wellStatus = tokens[index + 1].Content.ToString().ToUpper(); // Capture master switch status (OPEN/SHUT)
-                string mode = tokens[index + 2].Content.ToString().ToUpper();
-
-                double.TryParse(tokens[index + 3].Content.ToString(), System.Globalization.CultureInfo.InvariantCulture, out double oRat);
-                double.TryParse(tokens[index + 4].Content.ToString(), System.Globalization.CultureInfo.InvariantCulture, out double wRat);
-                double.TryParse(tokens[index + 5].Content.ToString(), System.Globalization.CultureInfo.InvariantCulture, out double gRat);
-                double.TryParse(tokens[index + 6].Content.ToString(), System.Globalization.CultureInfo.InvariantCulture, out double lRat);
-                double.TryParse(tokens[index + 8].Content.ToString(), System.Globalization.CultureInfo.InvariantCulture, out double minBhp);
-
-                index += 9;
-                AdvanceAndClearTrailingJunk(tokens, ref index);
-
-                if (deck.Wells.TryGetValue(wellName, out var wellData))
-                {
-                    wellData.ControlHistory.Add(new WellControlRecord
-                    {
-                        EffectiveDate = deck.CurrentSimDate, // Bound to active calendar step
-                        WellType = "PRODUCER",
-                        InjectionPhase = "NONE",
-                        WellStatus = wellStatus,
-                        ControlMode = mode,
-                        OilRateTarget = oRat,
-                        WaterRateTarget = wRat,
-                        GasRateTarget = gRat,
-                        LiquidRateTarget = lRat,
-                        MinBhpLimit = minBhp
-                    });
-                }
-            }
-        }
-        private void ParseWconinjeBlock(List<Token> tokens, ref int index, EclipseDataDeck deck)
-        {
-            while (index < tokens.Count)
-            {
-                ClearLeadingLayoutSpacers(tokens, ref index);
-                if (index >= tokens.Count || tokens[index].Type == TokenType.Slash) { if (index < tokens.Count) index++; break; }
-
-                string wellName = tokens[index].Content.ToString().Trim('\'').Trim('"');
-                string phaseType = tokens[index + 1].Content.ToString().ToUpper(); // WATER, GAS, etc.
-                string wellStatus = tokens[index + 2].Content.ToString().ToUpper(); // Capture master switch status (OPEN/SHUT)
-                string mode = tokens[index + 3].Content.ToString().ToUpper();
-                double.TryParse(tokens[index + 4].Content.ToString(), System.Globalization.CultureInfo.InvariantCulture, out double injRate);
-                double.TryParse(tokens[index + 5].Content.ToString(), System.Globalization.CultureInfo.InvariantCulture, out double maxBhp);
-
-                index += 6;
-                AdvanceAndClearTrailingJunk(tokens, ref index);
-
-                if (deck.Wells.TryGetValue(wellName, out var wellData))
-                {
-                    var control = new WellControlRecord
-                    {
-                        EffectiveDate = deck.CurrentSimDate, // Bound to active calendar step
-                        WellType = "INJECTOR",
-                        InjectionPhase = phaseType,
-                        WellStatus = wellStatus,
-                        ControlMode = mode,
-                        MaxBhpLimit = maxBhp
-                    };
-
-                    if (phaseType == "WATER") control.WaterRateTarget = injRate;
-                    else if (phaseType == "GAS") control.GasRateTarget = injRate;
-                    control.TargetRate = injRate; // Sync shared shorthand indicator field
-
-                    wellData.ControlHistory.Add(control);
-                }
-            }
-        }
+    
         private static void ClearLeadingLayoutSpacers(List<Token> tokens, ref int index)
         {
             while (index < tokens.Count &&
@@ -825,24 +750,24 @@ namespace EclipseDeckReader
                     switch (targetProp)
                     {
                         case "ACTNUM":
-                            if (deck.ActnumArray.Count == 0) InitializeUniformIntArray(deck.ActnumArray, totalCells, 1);
+                            if (deck.ActnumArray.Count == 0) InitializeUniformArray(deck.ActnumArray, totalCells, 1);
                             ApplyIntEqualsOverride(deck.ActnumArray, adjustedValue, iStart, iEnd, jStart, jEnd, kStart, kEnd, deck.NX, deck.NY, totalCells, targetProp);
                             break;
 
                         case "SATNUM":
-                            if (deck.SatnumArray.Count == 0) InitializeUniformIntArray(deck.SatnumArray, totalCells, 0); // Default to index 0
+                            if (deck.SatnumArray.Count == 0) InitializeUniformArray(deck.SatnumArray, totalCells, 0); // Default to index 0
                             // Convert user input value (1-based) to 0-based internal storage
                             ApplyIntEqualsOverride(deck.SatnumArray, adjustedValue - 1, iStart, iEnd, jStart, jEnd, kStart, kEnd, deck.NX, deck.NY, totalCells, targetProp);
                             break;
 
                         case "PVTNUM":
-                            if (deck.PvtnumArray.Count == 0) InitializeUniformIntArray(deck.PvtnumArray, totalCells, 0); // Default to index 0
+                            if (deck.PvtnumArray.Count == 0) InitializeUniformArray(deck.PvtnumArray, totalCells, 0); // Default to index 0
                             // Convert user input value (1-based) to 0-based internal storage
                             ApplyIntEqualsOverride(deck.PvtnumArray, adjustedValue - 1, iStart, iEnd, jStart, jEnd, kStart, kEnd, deck.NX, deck.NY, totalCells, targetProp);
                             break;
 
                         case "EQUINUM":
-                            if (deck.EquinumArray.Count == 0) InitializeUniformIntArray(deck.EquinumArray, totalCells, 0); // Default to index 0
+                            if (deck.EquinumArray.Count == 0) InitializeUniformArray(deck.EquinumArray, totalCells, 0); // Default to index 0
                             // Convert user input value (1-based) to 0-based internal storage
                             ApplyIntEqualsOverride(deck.EquinumArray, adjustedValue - 1, iStart, iEnd, jStart, jEnd, kStart, kEnd, deck.NX, deck.NY, totalCells, targetProp);
                             break;
@@ -879,7 +804,7 @@ namespace EclipseDeckReader
             for (int c = 0; c < size; c++) array.Add(value);
         }
 
-        private static void InitializeUniformIntArray(List<int> array, int size, int value)
+        private static void InitializeUniformArray(List<int> array, int size, int value)
         {
             array.Clear();
             array.Capacity = size;
@@ -975,6 +900,167 @@ namespace EclipseDeckReader
                 index += 2;
             }
             Console.WriteLine($"      [Data] MULTFLT section processed: {linesUpdated} transmissibility overrides applied.");
+        }
+
+
+        private static List<string> ReadRecordTokensUntilSlash(List<Token> tokens, ref int index)
+        {
+            var record = new List<string>();
+
+            while (index < tokens.Count)
+            {
+                ClearLeadingLayoutSpacers(tokens, ref index);
+                if (index >= tokens.Count) break;
+
+                if (tokens[index].Type == TokenType.Slash || tokens[index].Content.ToString() == "/")
+                {
+                    index++; // Consume terminating slash
+                    break;
+                }
+
+                // Hit next keyword before slash (malformed record guard)
+                if (tokens[index].Type == TokenType.Keyword)
+                {
+                    break;
+                }
+
+                string rawVal = tokens[index].Content.ToString().Trim('\'').Trim('"');
+                index++;
+
+                // Handle ECLIPSE default multipliers like "1*", "3*", "4*"
+                if (rawVal.EndsWith("*") && int.TryParse(rawVal.TrimEnd('*'), out int repeatCount))
+                {
+                    for (int r = 0; r < repeatCount; r++) record.Add("1*");
+                }
+                else if (rawVal.Contains("*"))
+                {
+                    var parts = rawVal.Split('*');
+                    if (parts.Length == 2 && int.TryParse(parts[0], out int rep))
+                    {
+                        for (int r = 0; r < rep; r++) record.Add(parts[1]);
+                    }
+                    else
+                    {
+                        record.Add(rawVal);
+                    }
+                }
+                else
+                {
+                    record.Add(rawVal);
+                }
+            }
+
+            return record;
+        }
+
+        private static double ParseOptionalDouble(List<string> items, int pos, double fallback = 0.0)
+        {
+            if (pos >= items.Count) return fallback;
+            string val = items[pos];
+            if (val == "1*" || string.IsNullOrWhiteSpace(val)) return fallback;
+            return double.TryParse(val, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out double parsed) ? parsed : fallback;
+        }
+
+        private void ParseWconprodBlock(List<Token> tokens, ref int index, EclipseDataDeck deck)
+        {
+            while (index < tokens.Count)
+            {
+                ClearLeadingLayoutSpacers(tokens, ref index);
+                if (index >= tokens.Count) break;
+                if (tokens[index].Type == TokenType.Slash || tokens[index].Content.ToString() == "/")
+                {
+                    index++;
+                    break;
+                }
+                if (tokens[index].Type == TokenType.Keyword) break;
+
+                List<string> record = ReadRecordTokensUntilSlash(tokens, ref index);
+                if (record.Count == 0) continue;
+
+                string wellName = record[0];
+
+                // Ensure well exists or register on the fly if WELSPECS was declared earlier or differently
+                if (!deck.Wells.TryGetValue(wellName, out var wellData))
+                {
+                    wellData = new WellData();
+                    deck.Wells[wellName] = wellData;
+                }
+
+                string wellStatus = record.Count > 1 && record[1] != "1*" ? record[1].ToUpper() : "OPEN";
+                string mode = record.Count > 2 && record[2] != "1*" ? record[2].ToUpper() : "BHP";
+
+                double oRat = ParseOptionalDouble(record, 3);
+                double wRat = ParseOptionalDouble(record, 4);
+                double gRat = ParseOptionalDouble(record, 5);
+                double lRat = ParseOptionalDouble(record, 6);
+                double resRat = ParseOptionalDouble(record, 7);
+                double bhp = ParseOptionalDouble(record, 8);
+
+                wellData.ControlHistory.Add(new WellControlRecord
+                {
+                    EffectiveDate = deck.CurrentSimDate,
+                    WellType = "PRODUCER",
+                    InjectionPhase = "NONE",
+                    WellStatus = wellStatus,
+                    ControlMode = mode,
+                    OilRateTarget = oRat,
+                    WaterRateTarget = wRat,
+                    GasRateTarget = gRat,
+                    LiquidRateTarget = lRat,
+                    MinBhpLimit = bhp
+                });
+
+                Console.WriteLine($"      [Schedule] WCONPROD parsed for well '{wellName}': Status={wellStatus}, Mode={mode}, BHP={bhp}");
+            }
+        }
+
+        private void ParseWconinjeBlock(List<Token> tokens, ref int index, EclipseDataDeck deck)
+        {
+            while (index < tokens.Count)
+            {
+                ClearLeadingLayoutSpacers(tokens, ref index);
+                if (index >= tokens.Count) break;
+                if (tokens[index].Type == TokenType.Slash || tokens[index].Content.ToString() == "/")
+                {
+                    index++;
+                    break;
+                }
+                if (tokens[index].Type == TokenType.Keyword) break;
+
+                List<string> record = ReadRecordTokensUntilSlash(tokens, ref index);
+                if (record.Count == 0) continue;
+
+                string wellName = record[0];
+
+                if (!deck.Wells.TryGetValue(wellName, out var wellData))
+                {
+                    wellData = new WellData();
+                    deck.Wells[wellName] = wellData;
+                }
+
+                string phaseType = record.Count > 1 && record[1] != "1*" ? record[1].ToUpper() : "WATER";
+                string wellStatus = record.Count > 2 && record[2] != "1*" ? record[2].ToUpper() : "OPEN";
+                string mode = record.Count > 3 && record[3] != "1*" ? record[3].ToUpper() : "RATE";
+                double rate = ParseOptionalDouble(record, 4);
+                double maxBhp = ParseOptionalDouble(record, 5);
+
+                var control = new WellControlRecord
+                {
+                    EffectiveDate = deck.CurrentSimDate,
+                    WellType = "INJECTOR",
+                    InjectionPhase = phaseType,
+                    WellStatus = wellStatus,
+                    ControlMode = mode,
+                    TargetRate = rate,
+                    MaxBhpLimit = maxBhp
+                };
+
+                if (phaseType == "WATER") control.WaterRateTarget = rate;
+                else if (phaseType == "GAS") control.GasRateTarget = rate;
+
+                wellData.ControlHistory.Add(control);
+                Console.WriteLine($"      [Schedule] WCONINJE parsed for well '{wellName}': Phase={phaseType}, Status={wellStatus}, Rate={rate}");
+            }
         }
     }
 }

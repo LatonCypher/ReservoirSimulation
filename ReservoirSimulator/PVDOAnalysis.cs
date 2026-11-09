@@ -86,7 +86,7 @@ namespace ReservoirSimulator
             double cMu = mVisc;                    // Viscosity increases with P -> c_mu is slope
             double viscAtPref = Exp(bVisc);        // e^intercept_Visc
 
-            result = new(pRef, co, boAtPref, cMu, viscAtPref, rSqBo, rSqVisc);
+            Result = new(pRef, co, boAtPref, cMu, viscAtPref, rSqBo, rSqVisc);
         }
 
         private static (double slope, double intercept, double rSquared) LinearRegression(List<double> x, List<double> y)

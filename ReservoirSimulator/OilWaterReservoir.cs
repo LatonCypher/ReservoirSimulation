@@ -1,7 +1,9 @@
 ﻿using EclipseDeckReader;
+using Microsoft.CodeAnalysis;
 using SepalSolver;
 using System.Text;
 using static ReservoirSimulator.Math;
+using static ReservoirSimulator.ReservoirJacobian;
 
 namespace ReservoirSimulator
 {
@@ -10,16 +12,13 @@ namespace ReservoirSimulator
         public int funcall;
         public List<double[]> P, S, Rate, OilRate, WaterRate, GasRate, Pwf, WaterCut;
         public List<double> Time, SweepEff;
-        readonly Func<ADiff<Vector2d>, ADiff<Vector2d>> Sws, Swe, Pc_D, Pc_I, Bo, Bw, μo, μw, γo, γw, Kro, Krw, Er;
-        // Define conversion constants
-        const double alpha = 1.127e-3,        // Darcy to Field units factor
-                beta = 5.615;                 // ft3 to bbl conversion factor
+        readonly Func<ADiff<Vector4d>, ADiff<Vector4d>> Er;
 
 
         double [] xs;
 
-        List<double> a_value = [], b = [];
-        List<int> a_index = [], a_start = [0];
+        List<double> J_value = [], R = [];
+        List<int> J_index = [], J_start = [0];
 
         static double betweenab(double a, double b, double f) => a + f*(b-a);
         static double interps(List<double> X, List<double> Y, double x)
@@ -79,19 +78,19 @@ namespace ReservoirSimulator
                 xs[indx++] = Qwells_n[i];                               // Matches Q index
             }
         }
-        double[] LinSolve(List<double> a_value, List<int> a_index, List<int> a_start, List<double> b)
+        double[] LinSolve(double[] values, int[] col_index, int[] row_ptr, double[] res)
         {
-            return MklSparseSolver.Solve([.. a_value], [.. a_index], [.. a_start], [.. b]);
+            return MklSparseSolver.Solve(values, col_index, row_ptr, res);
         }
 
-        readonly int Nx, Ny, Nz, NxNy, Ngrids, Nwells, varNum;
+        readonly int Nx, Ny, Nz, NxNy, Ngrids, NumActiveGrids, Nwells, varNum;
         readonly double[] Kx, Ky, Kz, Φ, Dx, Dy, Dz, Z, zTop;
         double[] Po_n, Sw_n, Pw_n, So_n, Qwells_n, Pwells_n, ErSw_Bw_n, ErSo_Bo_n, Coord, Zcorn, PoreVolume; 
         readonly double krw0, kro0, Pb, Prefw, Prefr, Pe, Pw_woc, Sw_r, So_r,
             Bo0, Bw0, Po_woc, Z_woc, co, cw, cr, bo, bw, nw, no, np,
             μo0, μw0, γo0, γw0, P_datum, Z_datum, Pc_max;
-        Grid<Vector2d>[] Grids;
-        List<Well<Vector2d>> Wells;
+        Grid<Vector4d>[] Grids;
+        List<Well<Vector4d>> Wells;
         Aquifer Aquifer;
         double[,] Trans;
         bool[,] Water_Upstream, Oil_Upstream;
@@ -102,6 +101,8 @@ namespace ReservoirSimulator
         PVTWAnalysis[] PVTWs;
         PVDOAnalysis[] PVDOs;
         SWOFAnalysis[] SWOFs;
+
+        
 
         public OilWaterReservoir(EclipseDataDeck Data)
         {
@@ -117,8 +118,8 @@ namespace ReservoirSimulator
             }
             else { Coord = [.. Data.CoordArray]; Zcorn = [.. Data.ZcornArray]; }
             Φ = [..Data.PorosityArray]; Kx = [..Data.PermXArray]; Ky = [..Data.PermYArray]; Kz = [..Data.PermZArray];
-            Grids = Zcorn is not null ? Utility.ProcessGrid<Vector2d>(Nx, Ny, Nz, Coord, Zcorn, Φ, Kx, Ky, Kz) :
-                Utility.ProcessGrid<Vector2d>(Nx, Ny, Nz, Dx, Dy, Dz, zTop, Φ, Kx, Ky, Kz);
+            Grids = Zcorn is not null ? Utility.ProcessGrid<Vector4d>(Nx, Ny, Nz, Coord, Zcorn, Φ, Kx, Ky, Kz) :
+                Utility.ProcessGrid<Vector4d>(Nx, Ny, Nz, Dx, Dy, Dz, zTop, Φ, Kx, Ky, Kz);
 
             // PVTW
             PVTWs = [.. Data.RawPvtwTables.Select(pvtw => new PVTWAnalysis(pvtw))];
@@ -140,7 +141,7 @@ namespace ReservoirSimulator
             γo0 = Data.SurfaceOilDensity/144; γw0 = Data.SurfaceWaterDensity/144;
 
             // REGION
-
+            NumActiveGrids = Data.ActnumArray.Sum();
             Utility.SetAcitveGrids(Grids, Data.ActnumArray, Er);
             Utility.SetSWOF(Grids, Data.SatnumArray, SWOFs);
             Utility.SetPVDO(Grids, Data.PvtnumArray, PVDOs, γo0); 
@@ -189,7 +190,11 @@ namespace ReservoirSimulator
                     EquilPVTCombinations[(e, p)] = equildata;
                 }
             }
+
+            // WELLS
+            Wells = [.. Data.Wells.Select(well => new Well<Vector4d>(well.Value) { Name = well.Key, Grids = Grids })];
         }
+
 
         public void Initialize()
         {
@@ -211,205 +216,373 @@ namespace ReservoirSimulator
                     grid.Sw_n = grid.Center.Z < equildata.ZWOC ? swoftable.Min(swof => swof.Sw) : swoftable.Max(swof => swof.Sw);
                 else grid.Sw_n = Utility.Interpolate(swoftable, pc, swof => swof.Pc, swof => swof.Sw);
                 grid.So_n = 1 - grid.Sw_n;
-            }
-
-            foreach (var well in Wells)
-            {
-                well.ComputeProductivityIndex<Vector2d>(Nx, Ny, Kx, Ky, Grids, DATA.StartDate);
-                well.Zref = 0;
+                ADiff<Vector4d> meanP = grid.So_n * grid.Po_n + grid.Sw_n * grid.Pw_n;
+                ADiff<Vector4d> Er_i = grid.Er(meanP);
+                ADiff<Vector4d> Bo_i = grid.Bo(grid.Po_n);
+                ADiff<Vector4d> Bw_i = grid.Bw(grid.Pw_n);
+                grid.ErSo_Bo_n = (Er_i * grid.So_n / Bo_i).Value;
+                grid.ErSw_Bw_n = (Er_i * grid.Sw_n / Bw_i).Value;
             }
         }
 
-        public static (List<int> start, List<int> index, List<double> value) DeleteCol(
-    List<int> a_start, List<int> a_index, List<double> a_value, List<int> index2delete)
+        public static void ApplyPrimaryVariableUpdate(double[] x, double[] dx, int numActiveGrids,
+            double dPmax = 200.0 ,  // max allowable pressure change per Newton step (e.g. 200 psi in Pa)
+            double dSmax = 0.20)    // max allowable saturation change per Newton step (20%)
         {
-            if (index2delete == null || index2delete.Count == 0)
-                return (a_start, a_index, a_value);
-
-            // 1. Convert deletion targets to a HashSet for O(1) lookups
-            HashSet<int> deleteSet = [..index2delete];
-
-            // 2. Build a global column remapping array safely
-            int maxCol = a_index.Count > 0 ? a_index.Max() + 1 : 0;
-            int[] colMap = new int[maxCol];
-            int currentNewCol = 0;
-
-            for (int c = 0; c < maxCol; c++)
+            // 1. Grid cell updates
+            for (int i = 0; i < numActiveGrids; i++)
             {
-                colMap[c] = deleteSet.Contains(c) ? -1 : currentNewCol++;
+                int idx_p = 2 * i + 0;
+                int idx_s = 2 * i + 1;
+
+                double dPo = dx[idx_p];
+                double dSw = dx[idx_s];
+
+                // Damping / step-size limiting on pressure
+                if (Abs(dPo) > dPmax)
+                    dPo = Sign(dPo) * dPmax;
+
+                // Damping / step-size limiting on saturation
+                if (Abs(dSw) > dSmax)
+                    dSw = Sign(dSw) * dSmax;
+
+                // Apply update: x = x - dx
+                double p_new = x[idx_p] - dPo;
+                double s_new = x[idx_s] - dSw;
+
+                // Physical bounds enforcement (saturation chopping)
+                p_new = Max(1e5, p_new);              // Ensure pressure stays positive
+                s_new = Clamp(s_new, 0.0, 1.0);       // Ensure 0 <= Sw <= 1
+
+                x[idx_p] = p_new;
+                x[idx_s] = s_new;
             }
 
-            // 3. Allocate clean tracking structures with estimated capacity bounds
-            List<int> new_start = new(a_start.Count) {0};
-            List<int> new_index = new(a_index.Count);
-            List<double> new_value = new(a_value.Count);
-
-            // 4. Process the entire matrix in a single linear sweep
-            int rowCount = a_start.Count - 1;
-            for (int i = 0; i < rowCount; i++)
+            // 2. Well variables update (starts right after active grid DOFs)
+            int wellStart = 2 * numActiveGrids;
+            for (int k = wellStart; k < x.Length; k++)
             {
-                int rowStart = a_start[i];
-                int rowEnd = a_start[i + 1];
-
-                for (int j = rowStart; j < rowEnd; j++)
-                {
-                    int globalCol = a_index[j];
-
-                    // Check boundary to guard against tracking arrays larger than structural coordinates
-                    if (globalCol >= 0 && globalCol < maxCol && colMap[globalCol] != -1)
-                    {
-                        new_index.Add(colMap[globalCol]);
-                        new_value.Add(a_value[j]);
-                    }
-                }
-                // The next row boundary is exactly the accumulated count of valid items
-                new_start.Add(new_index.Count);
+                x[k] -= dx[k];
             }
-
-            // FIX: Return the newly calculated compressed collections
-            return (new_start, new_index, new_value);
         }
 
-        public void Simulate2Phase(double[] ResultTime, List<Well<Vector2d>> Wells)
+        public void Simulate2Phase(double[] ResultTime)
         {
-            int Lx = Nx - 1, Ly = Ny - 1, Lz = Nz - 1;
-            Direction xDir = Direction.X, yDir = Direction.Y, zDir = Direction.Z;
-            bool Upstreamlock = false;
-            int totalItems = Ngrids;
+            Initialize();
+
             int cores = Environment.ProcessorCount;
-            int chunkSize = totalItems / cores;
-            Trans = new double[Ngrids, 6];
-            Water_Upstream = new bool[Ngrids, 6];
-            Oil_Upstream = new bool[Ngrids, 6];
+            int chunkSize = Ngrids / cores;
 
+            (int[] col_index, int[] row_ptr, double[] Values) =
+                ReservoirJacobian.Create(2, Grids, Wells);
+
+            (CellOffsets[] cellOffsets, FaceOffsets[][] faceOffsets, WellOffsets[] wellOffsets)
+                = ReservoirJacobian.PrecomputeOffsets(2, row_ptr, col_index, Grids, Wells);
+
+            int totalDofs = row_ptr.Length - 1;
+            using var solver = new MklPardisoSolver(totalDofs, row_ptr, col_index);
+
+            int numVars = 2 * NumActiveGrids + 2 * Nwells;
+            double[] Res = new double[numVars];
+
+            funcall = 0;
             void Residual(double[] xnp1, double time)
             {
                 funcall++;
 
-                //  HIGH CPU USAGE: Batched work gives cores long, uninterrupted calculations
+                // =========================================================================
+                // 1. HIGH CPU USAGE: Batched Parallel Assembly with Strict Row Ownership
+                // =========================================================================
                 Parallel.For(0, cores, coreId =>
                 {
                     int start = coreId * chunkSize;
-                    int end = (coreId == cores - 1) ? totalItems : start + chunkSize;
+                    int end = (coreId == cores - 1) ? Ngrids : start + chunkSize;
 
-                    // A single core executes this inner sequential loop at absolute maximum hardware speed
                     for (int m = start; m < end; m++)
                     {
                         if (Actnum[m] == 0) continue;
+                        var mgrid = Grids[m];
+                        int i = mgrid.ActiveIndex;
 
+                        int row_o = 2 * i + 0;
+                        int row_w = 2 * i + 1;
 
-                        int indx1 = 2*m, indx2 = 2*m + 1;
-                        ADiff<Vector2d> po_m = xnp1[2*m], sw_m = xnp1[2*m+1],
-                        pw_m = po_m - Pc_I(sw_m), so_m = 1 - sw_m;
-                        var meanP = so_m*po_m + sw_m*pw_m;
-                        ErSo_Bo_np1[m] = Er(meanP)*so_m/Bo(po_m);
-                        ErSw_Bw_np1[m] = Er(meanP)*sw_m/Bw(pw_m);
-                        Res[indx1] = -PoreVolume[m]*(ErSo_Bo_np1[m] - ErSo_Bo_n[m]);
-                        Res[indx2] = PoreVolume[m]*(ErSw_Bw_np1[m] - ErSw_Bw_n[m]);
+                        // Primary variables for cell i
+                        ADiff<Vector4d> Po_i = new(xnp1[2 * i + 0], new(1, 0, 0, 0));
+                        ADiff<Vector4d> Sw_i = new(xnp1[2 * i + 1], new(0, 1, 0, 0));
+                        ADiff<Vector4d> Pw_i = Po_i - mgrid.Pcow(Sw_i);
+                        ADiff<Vector4d> So_i = 1.0 - Sw_i;
 
-                        int k = m / NxNy, rem = m % NxNy,
-                        j = rem / Nx, i = rem % Nx;
+                        ADiff<Vector4d> meanP = So_i * Po_i + Sw_i * Pw_i;
+                        ADiff<Vector4d> Er_i = mgrid.Er(meanP);
+                        ADiff<Vector4d> Bo_i = mgrid.Bo(Po_i);
+                        ADiff<Vector4d> Bw_i = mgrid.Bw(Pw_i);
+                        ADiff<Vector4d> Kro_i = mgrid.Krog(So_i);
+                        ADiff<Vector4d> Krw_i = mgrid.Krw(Sw_i);
+                        ADiff<Vector4d> μo_i = mgrid.μo(Po_i);
+                        ADiff<Vector4d> μw_i = mgrid.μw(Pw_i);
+                        ADiff<Vector4d> γo_i = mgrid.γo(Po_i);
+                        ADiff<Vector4d> γw_i = mgrid.γw(Pw_i);
 
-                        // Add fluxes to the residual for this grid block from each of its 6 neighbors
-                        if (i > 0)
-                            AddFluxes(Xminus, m, m-1);
-                        if (i < Lx)
-                            AddFluxes(Xplus, m, m+1);
-                        if (j > 0)
-                            AddFluxes(Yminus, m, m-Nx);
-                        if (j < Ly)
-                            AddFluxes(Yplus, m, m+Nx);
-                        if (k > 0)
-                            AddFluxes(Zminus, m, m-NxNy);
-                        if (k < Lz)
-                            AddFluxes(Zplus, m, m+NxNy);
-                        // Add aquifer fluxes if an aquifer is present and connected to this grid block
-                        if (Aquifer != null && Aquifer.IsthereAquiferFlow(i, j, k))
-                            AddAquiferFluxes(Aquifer.FlowDirection, m, Aquifer.Pa, Aquifer.Connectivity_Efficiency);
+                        mgrid.ErSo_Bo_np1 = Er_i * So_i / mgrid.Bo(meanP);
+                        mgrid.ErSw_Bw_np1 = Er_i * Sw_i / mgrid.Bw(meanP);
+
+                        // Accumulation Residual: R = Vp * (State^{n+1} - State^n)
+                        ADiff<Vector4d> ResOil = mgrid.PoreVolume * (mgrid.ErSo_Bo_np1 - mgrid.ErSo_Bo_n);
+                        ADiff<Vector4d> ResWater = mgrid.PoreVolume * (mgrid.ErSw_Bw_np1 - mgrid.ErSw_Bw_n);
+
+                        // Direct write to Residual Vector
+                        Res[row_o] += ResOil.Value;
+                        Res[row_w] += ResWater.Value;
+
+                        // Direct write to Accumulation Jacobian (Block i, i)
+                        ref readonly var cOff = ref cellOffsets[i];
+                        Values[cOff.Diag[0]] += ResOil.Derivative[0];   // row_o, col_p_i
+                        Values[cOff.Diag[1]] += ResOil.Derivative[1];   // row_o, col_sw_i
+                        Values[cOff.Diag[2]] += ResWater.Derivative[0]; // row_w, col_p_i
+                        Values[cOff.Diag[3]] += ResWater.Derivative[1]; // row_w, col_sw_i
+
+                        // Inter-cell flux loop
+                        int faceCount = mgrid.Faces.Length;
+                        for (int f = 0; f < faceCount; f++)
+                        {
+                            var face = mgrid.Faces[f];
+                            for (int c = 0; c < face.GridIndices.Count; c++)
+                            {
+                                int n = face.GridIndices[c];
+
+                                // Guard: Skip inactive neighbor blocks (no-flow boundary)
+                                if (Actnum[n] == 0) continue;
+
+                                var ngrid = Grids[n];
+                                int j = ngrid.ActiveIndex;
+                                double transDt = face.Transmissibility[c] * dt;
+                                double dz = mgrid.Center.Z - ngrid.Center.Z;
+
+                                ADiff<Vector4d> Po_j = new(xnp1[2 * j + 0], new(0, 0, 1, 0));
+                                ADiff<Vector4d> Sw_j = new(xnp1[2 * j + 1], new(0, 0, 0, 1));
+                                ADiff<Vector4d> Pw_j = Po_j - ngrid.Pcow(Sw_j);
+                                ADiff<Vector4d> So_j = 1.0 - Sw_j;
+                                ADiff<Vector4d> Bo_j = ngrid.Bo(Po_j);
+                                ADiff<Vector4d> Bw_j = ngrid.Bw(Pw_j);
+                                ADiff<Vector4d> Kro_j = ngrid.Krog(So_j);
+                                ADiff<Vector4d> Krw_j = ngrid.Krw(Sw_j);
+                                ADiff<Vector4d> μo_j = ngrid.μo(Po_j);
+                                ADiff<Vector4d> μw_j = ngrid.μw(Pw_j);
+                                ADiff<Vector4d> γo_j = ngrid.γo(Po_j);
+                                ADiff<Vector4d> γw_j = ngrid.γw(Pw_j);
+
+                                // Hydrostatic potential differences
+                                ADiff<Vector4d> γo_avg = 0.5 * (γo_i + γo_j);
+                                ADiff<Vector4d> γw_avg = 0.5 * (γw_i + γw_j);
+                                ADiff<Vector4d> DΦo = Po_i - Po_j - γo_avg * dz;
+                                ADiff<Vector4d> DΦw = Pw_i - Pw_j - γw_avg * dz;
+
+                                // Upstream phase mobilities
+                                ADiff<Vector4d> lambda_o = (DΦo.Value >= 0.0)
+                                    ? (Kro_i / (μo_i * Bo_i)) : (Kro_j / (μo_j * Bo_j));
+                                ADiff<Vector4d> lambda_w = (DΦw.Value >= 0.0)
+                                    ? (Krw_i / (μw_i * Bw_i)) : (Krw_j / (μw_j * Bw_j));
+
+                                // Outflow flux from cell i to cell j
+                                ADiff<Vector4d> FluxOil = transDt * lambda_o * DΦo;
+                                ADiff<Vector4d> FluxWater = transDt * lambda_w * DΦw;
+
+                                // Direct write to Flux Residual
+                                Res[row_o] += FluxOil.Value;
+                                Res[row_w] += FluxWater.Value;
+
+                                // Direct write to Jacobian using precomputed face offsets
+                                ref readonly var fOff = ref faceOffsets[m][f];
+
+                                // Block (i, i) -> Derivatives wrt Cell i variables (slots 0 and 1)
+                                Values[fOff.Self[0]] += FluxOil.Derivative[0];   // row_o, col_p_i
+                                Values[fOff.Self[1]] += FluxOil.Derivative[1];   // row_o, col_sw_i
+                                Values[fOff.Self[2]] += FluxWater.Derivative[0]; // row_w, col_p_i
+                                Values[fOff.Self[3]] += FluxWater.Derivative[1]; // row_w, col_sw_i
+
+                                // Block (i, j) -> Derivatives wrt Neighbor j variables (slots 2 and 3)
+                                Values[fOff.Neighbor[0]] += FluxOil.Derivative[2];   // row_o, col_p_j
+                                Values[fOff.Neighbor[1]] += FluxOil.Derivative[3];   // row_o, col_sw_j
+                                Values[fOff.Neighbor[2]] += FluxWater.Derivative[2]; // row_w, col_p_j
+                                Values[fOff.Neighbor[3]] += FluxWater.Derivative[3]; // row_w, col_sw_j
+                            }
+                        }
                     }
                 });
 
+                // =========================================================================
+                // 2. Sequential Well System Assembly & Direct Memory Updates
+                // =========================================================================
                 for (int nwell = 0; nwell < Nwells; nwell++)
                 {
                     var well = Wells[nwell];
-                    pwell = xnp1[2*Ngrids + 2*nwell];
-                    qwell = xnp1[2*Ngrids + 2*nwell + 1];
-                    Res[2*Ngrids + 2*nwell] = qwell*dt;
-                    Res[2 * Ngrids + 2 * nwell + 1] = well.Constraint(time, pwell, qwell);
-                    well.Qw = 0; well.Qo = 0; Zref = well.Zref;
-                    ADiff water_rate = 0, oil_rate = 0;
+                    ref readonly var wOff = ref wellOffsets[nwell];
+
+                    // Global row indices for this well's equations
+                    int row_p = 2 * NumActiveGrids + 2 * nwell + 0; // Control constraint equation
+                    int row_q = 2 * NumActiveGrids + 2 * nwell + 1; // Rate definition equation
+
+                    // Well primary unknowns
+                    var pwell = new ADiff<Vector4d>(xnp1[row_p], new(1, 0, 0, 0));
+                    var qwell = new ADiff<Vector4d>(xnp1[row_q], new(0, 1, 0, 0));
+
+                    double Zref = well.ZControl;
+                    well.Qo = 0.0;
+                    well.Qw = 0.0;
+
+                    int perfCount = well.PerfNatIndex.Count;
+
                     switch (well.WellType)
                     {
-                        case WellType.Producer:
-                            foreach (int m in well.Perforation_NatIndex)
+                        case WellType.PRODUCER:
                             {
-                                if (Actnum[m] == 0) continue;
-                                int indx1 = 2*m, indx2 = 2*m+1;
-                                ADiff po_m = xnp1[indx1], sw_m = xnp1[indx2],
-                                pw_m = po_m - Pc_I(sw_m), so_m = 1 - sw_m,
-                                go_avg = 0.5*(γo(po_m) + γo(pwell)),
-                                gw_avg = 0.5*(γw(pw_m) + γw(pwell)),
-                                DΦo = pwell - po_m - go_avg*(Zref - Z[m]),
-                                DΦw = pwell - pw_m - gw_avg*(Zref - Z[m]);
-                                WI = well.Perforation_WI[well.Perforation_NatIndex.IndexOf(m)];
+                                for (int p = 0; p < perfCount; p++)
+                                {
+                                    int m = well.PerfNatIndex[p];
+                                    if (Actnum[m] == 0) continue;
 
-                                WIo = WI*Kro(so_m)/(μo(po_m)*Bo(po_m));
-                                oil_rate = DΦo*WIo;
-                                well.Qo += oil_rate.Value;
-                                Res[indx1] += oil_rate*dt;
-                                Res[2*Ngrids + 2*nwell] -= oil_rate*dt;
+                                    var mgrid = Grids[m];
+                                    int i = mgrid.ActiveIndex;
+                                    int indx1 = 2 * i + 0; // Grid Oil Equation row/col
+                                    int indx2 = 2 * i + 1; // Grid Water Equation row/col
 
-                                WIw = WI*Krw(sw_m)/(μw(pw_m)*Bw(pw_m));
-                                water_rate = DΦw*WIw;
-                                well.Qw += water_rate.Value;
-                                Res[indx2] += water_rate*dt;
-                                Res[2*Ngrids + 2*nwell] -= water_rate*dt;
+                                    // Grid block variables (Slots 2 and 3)
+                                    var Po_m = new ADiff<Vector4d>(xnp1[indx1], new(0, 0, 1, 0));
+                                    var Sw_m = new ADiff<Vector4d>(xnp1[indx2], new(0, 0, 0, 1));
+                                    var Pw_m = Po_m - mgrid.Pcow(Sw_m);
+                                    var So_m = 1.0 - Sw_m;
+
+                                    var Bo_m = mgrid.Bo(Po_m);
+                                    var Bw_m = mgrid.Bw(Pw_m);
+                                    var Kro_m = mgrid.Krog(So_m);
+                                    var Krw_m = mgrid.Krw(Sw_m);
+                                    var μo_m = mgrid.μo(Po_m);
+                                    var μw_m = mgrid.μw(Pw_m);
+                                    var γo_m = mgrid.γo(Po_m);
+                                    var γw_m = mgrid.γw(Pw_m);
+
+                                    var γo_well = mgrid.γo(pwell);
+                                    var γw_well = mgrid.γw(pwell);
+
+                                    var go_avg = 0.5 * (γo_m + γo_well);
+                                    var gw_avg = 0.5 * (γw_m + γw_well);
+                                    double dz = mgrid.Center.Z - Zref;
+
+                                    // Driving force (Flow into well is positive)
+                                    var DΦo = Po_m - pwell - go_avg * dz;
+                                    var DΦw = Pw_m - pwell - gw_avg * dz;
+
+                                    if (DΦo.Value < 0.0) DΦo = 0.0;
+                                    if (DΦw.Value < 0.0) DΦw = 0.0;
+
+                                    var WIo = mgrid.WI * (Kro_m / (μo_m * Bo_m));
+                                    var WIw = mgrid.WI * (Krw_m / (μw_m * Bw_m));
+
+                                    var rate_oil = WIo * DΦo;
+                                    var rate_water = WIw * DΦw;
+
+                                    well.Qo += rate_oil.Value;
+                                    well.Qw += rate_water.Value;
+
+                                    // Residual on reservoir cells (Outflow: +rate * dt)
+                                    Res[indx1] += rate_oil.Value * dt;
+                                    Res[indx2] += rate_water.Value * dt;
+
+                                    // Jacobian on reservoir equations: d/d(Pwell)
+                                    Values[wOff.Rm_dPwell[p][0]] += rate_oil.Derivative[0] * dt;
+                                    Values[wOff.Rm_dPwell[p][1]] += rate_water.Derivative[0] * dt;
+
+                                    // Jacobian on reservoir equations: d/d(GridVars) -> Block (i, i)
+                                    ref readonly var cOff = ref cellOffsets[i];
+                                    Values[cOff.Diag[0]] += rate_oil.Derivative[2] * dt;   // d(Ro)/d(Po)
+                                    Values[cOff.Diag[1]] += rate_oil.Derivative[3] * dt;   // d(Ro)/d(Sw)
+                                    Values[cOff.Diag[2]] += rate_water.Derivative[2] * dt; // d(Rw)/d(Po)
+                                    Values[cOff.Diag[3]] += rate_water.Derivative[3] * dt; // d(Rw)/d(Sw)
+
+                                    // Coupling to Well Rate Definition (Row q): d/d(GridVars)
+                                    Values[wOff.RowQ_dGrid[p][0]] += -(rate_oil.Derivative[2] + rate_water.Derivative[2]); // d/d(Po_m)
+                                    Values[wOff.RowQ_dGrid[p][1]] += -(rate_oil.Derivative[3] + rate_water.Derivative[3]); // d/d(Sw_m)
+                                }
+                                break;
                             }
-                            break;
 
                         case WellType.INJECTOR:
-                            foreach (int m in well.Perforation_NatIndex)
                             {
-                                if (Actnum[m] == 0) continue;
-                                int indx1 = 2*m, indx2 = 2*m+1;
-                                ADiff po_m = xnp1[indx1], sw_m = xnp1[indx2],
-                                pw_m = po_m - Pc_I(sw_m), so_m = 1 - sw_m,
-                                gw_avg = 0.5*(γw(pw_m) + γw(pwell)),
-                                DΦw = pwell - pw_m - gw_avg*(Zref - Z[m]);
-                                WI = well.Perforation_WI[well.Perforation_NatIndex.IndexOf(m)];
+                                for (int p = 0; p < perfCount; p++)
+                                {
+                                    int m = well.PerfNatIndex[p];
+                                    if (Actnum[m] == 0) continue;
 
-                                WIw = WI*krw0/(μw(pwell)*Bw(pwell));
-                                water_rate = DΦw*WIw;
-                                well.Qw += water_rate.Value;
-                                Res[indx2] += water_rate*dt;
-                                Res[2*Ngrids + 2*nwell] -= water_rate*dt;
+                                    var mgrid = Grids[m];
+                                    int i = mgrid.ActiveIndex;
+                                    int indx1 = 2 * i + 0;
+                                    int indx2 = 2 * i + 1;
+
+                                    var Po_m = new ADiff<Vector4d>(xnp1[indx1], new(0, 0, 1, 0));
+                                    var Sw_m = new ADiff<Vector4d>(xnp1[indx2], new(0, 0, 0, 1));
+                                    var Pw_m = Po_m - mgrid.Pcow(Sw_m);
+
+                                    var Bw_well = mgrid.Bw(pwell);
+                                    var μw_well = mgrid.μw(pwell);
+                                    var γw_well = mgrid.γw(pwell);
+                                    var γw_m = mgrid.γw(Pw_m);
+
+                                    var gw_avg = 0.5 * (γw_m + γw_well);
+                                    double dz = mgrid.Center.Z - Zref;
+
+                                    var DΦw = pwell - Pw_m + gw_avg * dz;
+                                    if (DΦw.Value < 0.0) DΦw = 0.0;
+
+                                    var WIw = mgrid.WI * (1.0 / (μw_well * Bw_well));
+                                    var rate_water = WIw * DΦw;
+
+                                    well.Qw += rate_water.Value;
+
+                                    // Residual on reservoir cells (Injection is inflow: -rate * dt)
+                                    Res[indx2] += -rate_water.Value * dt;
+
+                                    // Jacobian on reservoir equations: d/d(Pwell)
+                                    Values[wOff.Rm_dPwell[p][1]] += -rate_water.Derivative[0] * dt;
+
+                                    // Jacobian on reservoir equations: d/d(GridVars) -> Block (i, i)
+                                    ref readonly var cOff = ref cellOffsets[i];
+                                    Values[cOff.Diag[2]] += -rate_water.Derivative[2] * dt; // d(Rw)/d(Po)
+                                    Values[cOff.Diag[3]] += -rate_water.Derivative[3] * dt; // d(Rw)/d(Sw)
+
+                                    // Coupling to Well Rate Definition (Row q): d/d(GridVars)
+                                    Values[wOff.RowQ_dGrid[p][0]] += -rate_water.Derivative[2]; // d/d(Po_m)
+                                    Values[wOff.RowQ_dGrid[p][1]] += -rate_water.Derivative[3]; // d/d(Sw_m)
+                                }
+                                break;
                             }
-                            break;
                     }
+
+                    // =========================================================================
+                    // 3. Close the Well System (Row p and Row q)
+                    // =========================================================================
+
+                    // --- A. Evaluate the Well Operating Constraint (Row p) ---
+                    // Row p enforces the target limit:
+                    // - If BHP-controlled:  R_p = P_well - BHP_target = 0
+                    // - If Rate-controlled: R_p = Q_well - TargetRate = 0
+                    ADiff<Vector4d> wellConstraint = well.Constraint(pwell, qwell);
+
+                    Res[row_p] += wellConstraint.Value;
+                    // Derivatives of the constraint with respect to well unknowns:
+                    // - BHP mode:  d(R_p)/d(Pwell) = 1.0,  d(R_p)/d(Qwell) = 0.0
+                    // - Rate mode: d(R_p)/d(Pwell) = 0.0,  d(R_p)/d(Qwell) = 1.0
+                    Values[wOff.RowP_Pwell] += wellConstraint.Derivative[0];
+                    Values[wOff.RowP_Qwell] += wellConstraint.Derivative[1];
                 }
-                b.Clear(); a_value.Clear();
-                a_index.Clear(); a_start.Clear();
-                a_start.Add(0);
-                foreach (var res in Res.Where(r=> r is not null))
-                {
-                    b.Add(res.Value);
-                    var sdic = res.Derivatives.OrderBy(kvp => kvp.Key);
-                    a_value.AddRange(sdic.Select(kvp => kvp.Value));
-                    a_index.AddRange(sdic.Select(kvp => kvp.Key));
-                    a_start.Add(a_value.Count);
-                }
-                if(Columns2Delete.Count > 0)
-                    (a_start, a_index, a_value) = DeleteCol(a_start, a_index, a_value, Columns2Delete);
             }
 
             dt = 0.1;
             // Initialize historical data tracking containers for plotting and reporting
-            P = [Po_n]; S = [Sw_n]; Rate = [Qwells_n];
-            Pwf = [Pwells_n]; WaterCut = [new double[Nwells]];
-            Time = [0.0]; SweepEff = [0.0];
-            List<double> Interval = [0, .. ResultTime];
+            DateTime startDate = DATA.StartDate, currentSimDate;
+            List<DateTime> Interval = [startDate, .. ResultTime.Select(time => startDate.AddDays(time))];
             foreach (var well in Wells)
-                Interval.AddRange(well.ProfileTime);
+                Interval.AddRange(well.GetEventTimes());
             Interval = [.. Interval.Distinct().OrderBy(x => x)];
             Console.WriteLine($"""
                     Total Grids = {Ngrids}, 
@@ -419,15 +592,17 @@ namespace ReservoirSimulator
                     """);
             double L = 0, tnp1, history_dtmax = 0, rnorm = 0;
             bool staterejected, isComplete;
+            double[] dx = new double[totalDofs];
             for (int i = 1; i < Interval.Count; i++)
             {
-                L = Interval[i];
+                L = Interval[i].Subtract(startDate).TotalDays;
                 dt = Min(dt, Abs(L - t));
                 isComplete = false;
                 while (!isComplete)
                 {
                     staterejected = false;
                     tnp1 = t + dt;
+                    currentSimDate = startDate.AddDays(tnp1);
                     InitialGuess();
 
                     // Call the Newton-Raphson nonlinear solver to
@@ -446,17 +621,16 @@ namespace ReservoirSimulator
                     {
                         //Upstreamlock = iter > 4;
                         // Solve the nonlinear system using Newton-Raphson method
-                        Residual(xs, tnp1); rnorm = b.Max(Abs);
-                        double[] dx = LinSolve(a_value, a_index, a_start, b);
+                        Array.Clear(Values, 0, Values.Length);
+                        Array.Clear(Res, 0, Res.Length);
+                        Residual(xs, tnp1); rnorm = Res.Max(Abs);
 
-                        int activecount = 0;
-                        for (int v = 0; v < 2*Ngrids; v++)
-                            if (Actnum[v/2] == 1) 
-                                xs[v].Value -= dx[activecount++];
+                        // 2. Direct solve: J * dx = Res
+                        solver.Solve(Values, Res, dx);
 
-                        for (int v = 2*Ngrids; v < varNum; v++)
-                            xs[v].Value -= dx[activecount++];
-                        
+                        // 3. Update primary variables in field units: x^{k+1} = x^k - dx
+                        ApplyPrimaryVariableUpdate(xs, dx, NumActiveGrids);
+
                         Console.WriteLine($"  {iter,4}    |    {rnorm:E4}");
                         isConverged = rnorm < 1e-6;
                         if (isConverged) break;
@@ -500,13 +674,13 @@ namespace ReservoirSimulator
                     for (int n = 0; n < Nwells; n++)
                     {
                         // Validate Producer constraints:
-                        if (Wells[n].WellType == WellType.Producer)
+                        if (Wells[n].WellType == WellType.PRODUCER)
                         {
                             // switch to BHP control if pressure falls below minimum limits
-                            if (Wells[n].ConstraintType != ConstraintType.MinPressure &&
+                            if (Wells[n].ConstraintType != ConstraintType.MINP &&
                                 Pwells_n[n] < Wells[n].MinPressure)
                             {
-                                Wells[n].ConstraintType = ConstraintType.MinPressure;
+                                Wells[n].ConstraintType = ConstraintType.MINP;
                                 Console.WriteLine($"""
                                 ===============================================================
                                       Rejected (Minimum Pressure Violated) @ {Wells[n].Name}
@@ -521,10 +695,10 @@ namespace ReservoirSimulator
                         {
 
                             // switch to BHP control if pressure exceeds fracturing limits
-                            if (Wells[n].ConstraintType != ConstraintType.MaxPressure &&
+                            if (Wells[n].ConstraintType != ConstraintType.MAXP &&
                                 Pwells_n[n] > Wells[n].MaxPressure)
                             {
-                                Wells[n].ConstraintType = ConstraintType.MaxPressure;
+                                Wells[n].ConstraintType = ConstraintType.MAXP;
                                 Console.WriteLine("""
                                 ================================================
                                       Rejected (Maximum Pressure Violated) 
@@ -545,11 +719,15 @@ namespace ReservoirSimulator
                     SweepEff.Add((Sw_n.Sum() - S[0].Sum())*100/(Ngrids - S[0].Sum()));
                     for (int m = 0; m < Ngrids; m++)
                     {
-                        if (Actnum[m] == 1)
-                        {
-                            ErSo_Bo_n[m] = ErSo_Bo_np1[m].Value;
-                            ErSw_Bw_n[m] = ErSw_Bw_np1[m].Value;
-                        }
+                        var grid = Grids[m];
+                        if (!grid.isActive) continue;
+                        grid.ErSo_Bo_n = grid.ErSo_Bo_np1.Value;
+                        grid.ErSw_Bw_n = grid.ErSw_Bw_np1.Value;
+                        ADiff<Vector4d> Po_i = new(xs[2 * grid.ActiveIndex + 0], new(1, 0, 0, 0));
+                        ADiff<Vector4d> Sw_i = new(xs[2 * grid.ActiveIndex + 1], new(0, 1, 0, 0));
+                        ADiff<Vector4d> Pw_i = Po_i - grid.Pcow(Sw_i);
+                        ADiff<Vector4d> So_i = 1.0 - Sw_i;
+                        grid.SaveResult(po: Po_i.Value, pw: Pw_i.Value, so: So_i.Value, sw: Sw_i.Value);
                     }
 
                     // Adaptive Time-Stepping Logic:
@@ -712,7 +890,7 @@ namespace ReservoirSimulator
             Directory.CreateDirectory(outputDirectory);
             foreach (var well in Wells)
             {
-                double[][] Trajectory = well.GetTrajectoryCoordinates(xCoords, yCoords, zCoords);
+                double[][] Trajectory = well.GetTrajectoryCoordinates(Grids);
                 ExportWellAsVtk(Path.Combine(outputDirectory, $"{well.Name}.vtk"), well.Name, Trajectory);
             }
         }
@@ -800,7 +978,7 @@ namespace ReservoirSimulator
             for (int m = 0; m < Ngrids; m++)
             {
                 if (Actnum[m] == 0) continue;
-                Grid grid = Grids[m];
+                var grid = Grids[m];
 
                 for (int c = 0; c < 8; c++)
                     xmlPoints.AppendLine($"{grid.Corners[c].X} {grid.Corners[c].Y} {grid.Corners[c].Z}");     

@@ -1,9 +1,10 @@
-﻿using static SepalSolver.Math;
+﻿using SepalSolver;
+using static SepalSolver.Math;
 
 namespace ReservoirSimulator
 {
     public readonly struct EquilResult(double zDatum, double pDatum, double zWoc, double pcWoc, 
-         double zGoc, double pcGoc, double poWoc, double pwWoc, double poGoc, double pgGoc)
+         double zGoc, double pcGoc, double poWoc, double pwWoc, double poGoc, double pgGoc) 
     {
         public double ZDatum { get; } = zDatum;
         public double PDatum { get; } = pDatum;

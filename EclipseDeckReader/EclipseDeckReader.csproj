@@ -9,8 +9,8 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="SepalSolver" Version="1.2.3" />
-    <PackageReference Include="SepalSolver.PlotLib" Version="1.2.3" />
+    <PackageReference Include="SepalSolver" Version="1.3.2" />
+    <PackageReference Include="SepalSolver.PlotLib" Version="1.3.2" />
   </ItemGroup>
 
 </Project>

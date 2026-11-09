@@ -84,6 +84,12 @@ namespace ReservoirSimulator
         public static int Max(int x, int y) => x >= y ? x : y;
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static int Clamp(int x, int min, int max) => x >= min ? (x <= max ? x : max) : min;
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static double Clamp(double x, double min, double max) => x >= min ? (x <= max ? x : max) : min;
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static int Sign(double x) => (x > 0) ? 1 : ((x < 0) ? -1 : 0);
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]

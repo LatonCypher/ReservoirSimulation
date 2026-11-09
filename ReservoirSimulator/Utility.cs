@@ -77,9 +77,7 @@ namespace ReservoirSimulator
         public static void ComputeFaceTransmissibility<T>(Grid<T>[] Grids) where T : struct, IVectorND<T>
         {
             // 1. Gather all faces from all active grid cells into a single flat list
-            List<Face> Faces = [];
-            foreach (var grid in Grids)
-                Faces.AddRange(grid.Faces);
+            List<Face> Faces = Grids.Where(grid=>grid.isActive).SelectMany(grid => grid.Faces).ToList();
 
             // 2. Instantiate and build the AABB Tree (Runs in O(N log N))
             AABBTree spatialTree = new();
@@ -97,12 +95,12 @@ namespace ReservoirSimulator
                 foreach (var candidate in overlappingCandidates)
                 {
                     // Rule A: Skip if the face belongs to the exact same cell
-                    if (candidate.ActiveGridIndex == currentFace.ActiveGridIndex)
+                    if (candidate.GlobalGridIndex == currentFace.GlobalGridIndex)
                         continue;
 
                     // Rule B: Enforce index ordering constraint (current < candidate)
                     // This guarantees each cell-face pair interaction is evaluated exactly once
-                    if (currentFace.ActiveGridIndex >= candidate.ActiveGridIndex)
+                    if (currentFace.GlobalGridIndex >= candidate.GlobalGridIndex)
                         continue;
 
                     // Rule C: Run your computational geometry suite checks
@@ -118,13 +116,6 @@ namespace ReservoirSimulator
                         }
                     }
                 }
-            }
-
-            foreach (var grid in Grids)
-            {
-                if (!grid.isActive) continue;
-                foreach (var face in grid.Faces)
-                    grid.indexOfConnectingGrids.AddRange(face.GridIndices);
             }
         }
 
@@ -247,8 +238,8 @@ namespace ReservoirSimulator
             double x1 = f1.Permeability / f1.PerpendicularDistance2Center,
                    x2 = f2.Permeability / f2.PerpendicularDistance2Center;
             double T = area * Harmmean(x1, x2); 
-            f1.GridIndices.Add(f2.ActiveGridIndex); f1.Transmissibility.Add(T);
-            f2.GridIndices.Add(f1.ActiveGridIndex); f2.Transmissibility.Add(T);
+            f1.GridIndices.Add(f2.GlobalGridIndex); f1.Transmissibility.Add(T);
+            f2.GridIndices.Add(f1.GlobalGridIndex); f2.Transmissibility.Add(T);
         }
 
         
@@ -441,14 +432,14 @@ namespace ReservoirSimulator
             for (int m = 0; m < Grids.Length; m++)
             {
                 var grid = Grids[m];
-                grid.isActive = Actnum[m] == 1;
-                if(grid.isActive)
+                grid.GlobalIndex = m;
+                if(Actnum[m] > 0)
                 {
                     grid.Er = Er;
                     grid.MakeFaces();
-                    grid.ActiveIndex = activeindex; 
-                    foreach(var face in grid.Faces) 
-                        face.ActiveGridIndex = activeindex;
+                    grid.ActiveIndex = activeindex;
+                    foreach (var face in grid.Faces)
+                        face.GlobalGridIndex = m;
                     activeindex++;
                 }
             }
@@ -456,94 +447,80 @@ namespace ReservoirSimulator
 
         public static void SetPVDO<T>(Grid<T>[] Grids, List<int> Pvtnum,  PVDOAnalysis[] pvdo, double γo0) where T : struct, IVectorND<T>
         {
-            for (int m = 0; m < Grids.Length; m++)
-            {
-                if (Grids[m].isActive)
-                {
-                    Grids[m].Bo = Po => pvdo[Pvtnum[m]].Result.EvaluateBo(Po);
-                    Grids[m].μo = Po => pvdo[Pvtnum[m]].Result.EvaluateMuo(Po);
-                    Grids[m].γo = Po => γo0/pvdo[Pvtnum[m]].Result.EvaluateBo(Po);
-                }
+            foreach(var grid in Grids)
+            { 
+                if (!grid.isActive) continue;
+                grid.Bo = Po => pvdo[Pvtnum[grid.GlobalIndex]].Result.EvaluateBo(Po);
+                grid.μo = Po => pvdo[Pvtnum[grid.GlobalIndex]].Result.EvaluateMuo(Po);
+                grid.γo = Po => γo0 / pvdo[Pvtnum[grid.GlobalIndex]].Result.EvaluateBo(Po);
             }
         }
 
         public static void SetPVDG<T>(Grid<T>[] Grids, List<int> Pvtnum, PVDGAnalysis[] pvdg, double γg0) where T : struct, IVectorND<T>
         {
-            for (int m = 0; m < Grids.Length; m++)
+            foreach(var grid in Grids)
             {
-                if (Grids[m].isActive)
-                {
-                    Grids[m].Bg = Pg => pvdg[Pvtnum[m]].Result.EvaluateBg(Pg);
-                    Grids[m].μg = Pg => pvdg[Pvtnum[m]].Result.EvaluateMug(Pg);
-                    Grids[m].γg = Pg => γg0 / pvdg[Pvtnum[m]].Result.EvaluateBg(Pg);
-                }
+                if (!grid.isActive) continue;
+                grid.Bg = Pg => pvdg[Pvtnum[grid.GlobalIndex]].Result.EvaluateBg(Pg);
+                grid.μg = Pg => pvdg[Pvtnum[grid.GlobalIndex]].Result.EvaluateMug(Pg);
+                grid.γg = Pg => γg0 / pvdg[Pvtnum[grid.GlobalIndex]].Result.EvaluateBg(Pg);
             }
         }
 
         public static void SetPVTO<T>(Grid<T>[] Grids, List<int> Pvtnum, PVTOAnalysis[] pvto, double γo0, double γg0) where T : struct, IVectorND<T>
         {
-            for (int m = 0; m < Grids.Length; m++)
+            foreach(var grid in Grids)
             {
-                if (Grids[m].isActive)
-                {
-                    Grids[m].Rs = Po => pvto[Pvtnum[m]].Result.EvaluateRs(Po);
-                    Grids[m].Bo = Rs => pvto[Pvtnum[m]].Result.EvaluateBo(Rs);
-                    Grids[m].μo = Rs => pvto[Pvtnum[m]].Result.EvaluateMuo(Rs);
-                    Grids[m].γo = Rs => (γo0 + 0.178*Rs* γg0) / pvto[Pvtnum[m]].Result.EvaluateBo(Rs);
-                }
+                if (!grid.isActive) continue;
+                grid.Rs = Po => pvto[Pvtnum[grid.GlobalIndex]].Result.EvaluateRs(Po);
+                grid.Bo = Rs => pvto[Pvtnum[grid.GlobalIndex]].Result.EvaluateBo(Rs);
+                grid.μo = Rs => pvto[Pvtnum[grid.GlobalIndex]].Result.EvaluateMuo(Rs);
+                grid.γo = Rs => (γo0 + 0.178 * Rs * γg0) / pvto[Pvtnum[grid.GlobalIndex]].Result.EvaluateBo(Rs);
             }
         }
 
         public static void SetPVTG<T>(Grid<T>[] Grids, List<int> Pvtnum, PVTGAnalysis[] pvtg, double γo0, double γg0) where T : struct, IVectorND<T>
         {
-            for (int m = 0; m < Grids.Length; m++)
+            foreach(var grid in Grids)
             {
-                if (Grids[m].isActive)
-                {
-                    Grids[m].Rv = Pg => pvtg[Pvtnum[m]].Result.EvaluateRv(Pg);
-                    Grids[m].Bg = Rv => pvtg[Pvtnum[m]].Result.EvaluateBg(Rv);
-                    Grids[m].μg = Rv => pvtg[Pvtnum[m]].Result.EvaluateMug(Rv);
-                    Grids[m].γg = Rv => (γg0 + 5.615 * Rv * γo0) / pvtg[Pvtnum[m]].Result.EvaluateBg(Rv);
-                }
+                if (!grid.isActive) continue;
+                grid.Rv = Pg => pvtg[Pvtnum[grid.GlobalIndex]].Result.EvaluateRv(Pg);
+                grid.Bg = Rv => pvtg[Pvtnum[grid.GlobalIndex]].Result.EvaluateBg(Rv);
+                grid.μg = Rv => pvtg[Pvtnum[grid.GlobalIndex]].Result.EvaluateMug(Rv);
+                grid.γg = Rv => (γg0 + 5.615 * Rv * γo0) / pvtg[Pvtnum[grid.GlobalIndex]].Result.EvaluateBg(Rv);
             }
         }
 
         public static void SetPVTW<T>(Grid<T>[] Grids, List<int> Pvtnum, PVTWAnalysis[] pvtw, double γw0) where T : struct, IVectorND<T>
         {
-            for (int m = 0; m < Grids.Length; m++)
+            foreach(var grid in Grids)
             {
-                if (Grids[m].isActive)
-                {
-                    Grids[m].Bw = Pw => pvtw[Pvtnum[m]].Result.EvaluateBw(Pw);
-                    Grids[m].μw = Pw => pvtw[Pvtnum[m]].Result.EvaluateMuw(Pw);
-                    Grids[m].γw = Pw => γw0 / pvtw[Pvtnum[m]].Result.EvaluateBw(Pw);
-                }
+                if (!grid.isActive) continue;
+                grid.Bw = Pw => pvtw[Pvtnum[grid.GlobalIndex]].Result.EvaluateBw(Pw);
+                grid.μw = Pw => pvtw[Pvtnum[grid.GlobalIndex]].Result.EvaluateMuw(Pw);
+                grid.γw = Pw => γw0 / pvtw[Pvtnum[grid.GlobalIndex]].Result.EvaluateBw(Pw);
             }
         }
 
         public static void SetSWOF<T>(Grid<T>[] Grids, List<int> Satnum, SWOFAnalysis[] swof) where T : struct, IVectorND<T>
         {
-            for (int m = 0; m < Grids.Length; m++)
+            foreach(var grid in Grids)
             {
-                if (Grids[m].isActive)
-                {
-                    Grids[m].Krw = Sw => swof[Satnum[m]].Result.EvaluateKrw(Sw);
-                    Grids[m].Krow = Sw => swof[Satnum[m]].Result.EvaluateKrow(Sw);
-                    Grids[m].Pcow = Sw => swof[Satnum[m]].Result.EvaluatePcow(Sw);
-                }
+                if (!grid.isActive) continue;
+                grid.Krw = Sw => swof[Satnum[grid.GlobalIndex]].Result.EvaluateKrw(Sw);
+                grid.Krow = Sw => swof[Satnum[grid.GlobalIndex]].Result.EvaluateKrow(Sw);
+                grid.Pcow = Sw => swof[Satnum[grid.GlobalIndex]].Result.EvaluatePcow(Sw);
             }
         }
 
         public static void SetSGOF<T>(Grid<T>[] Grids, List<int> Satnum, SGOFAnalysis[] sgof) where T : struct, IVectorND<T>
         {
-            for (int m = 0; m < Grids.Length; m++)
+            foreach(var grid in Grids)
             {
-                if (Grids[m].isActive)
-                {
-                    Grids[m].Krg = Sg => sgof[Satnum[m]].Result.EvaluateKrg(Sg);
-                    Grids[m].Krog = Sg => sgof[Satnum[m]].Result.EvaluateKrog(Sg);
-                    Grids[m].Pcgo = Sg => sgof[Satnum[m]].Result.EvaluatePcgo(Sg);
-                }
+                if (!grid.isActive) continue;
+                grid.Krg = Sg => sgof[Satnum[grid.GlobalIndex]].Result.EvaluateKrg(Sg);
+                grid.Krog = Sg => sgof[Satnum[grid.GlobalIndex]].Result.EvaluateKrog(Sg);
+                grid.Pcgo = Sg => sgof[Satnum[grid.GlobalIndex]].Result.EvaluatePcgo(Sg);
             }
         }
 
@@ -554,7 +531,7 @@ namespace ReservoirSimulator
             Grid<T>[] Grids = new Grid<T>[ngrids];
             for (int m = 0; m < ngrids; m++)
             {
-                int k = m / nx * ny, rem = m % nx * ny, j = rem / nx, i = rem % nx;
+                int k = m / nxny, rem = m % nxny, j = rem / nx, i = rem % nx;
                 Grids[m] = new Grid<T>
                 {
                     IJKIndex = (i, j, k),

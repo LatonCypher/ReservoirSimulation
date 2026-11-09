@@ -1,4 +1,5 @@
-﻿using System;
+﻿using SepalSolver;
+using System;
 using System.Collections.Generic;
 using System.Text;
 
@@ -12,8 +13,9 @@ namespace ReservoirSimulator
         public FlowDirection FlowDirection;
         public double Connectivity_Efficiency, Pa;
 
-        public bool IsthereAquiferFlow(int i, int j, int k)
+        public bool IsthereAquiferFlow<T>(Grid<T> grid) where T : struct, IVectorND<T>
         {
+            (int i, int j, int k) = grid.IJKIndex;
             return (Iinterval[0] <= i && i <= Iinterval[1]) &&
                    (Jinterval[0] <= j && j <= Jinterval[1]) &&
                    (Kinterval[0] <= k && k <= Kinterval[1]);
@@ -55,7 +57,7 @@ namespace ReservoirSimulator
                 if (Kinterval[0] != Kinterval[1] && Kinterval[0] != 0)
                     throw new ArgumentException("Invalid flow direction for the given K interval.");
             }
-            else if (FlowDirection == FlowDirection.Kplus)
+            else if (FlowDirection == FlowDirection.KP)
             {
                 if (Kinterval[0] != Kinterval[1] && Kinterval[1] >= 0)
                     throw new ArgumentException("Invalid flow direction for the given K interval.");

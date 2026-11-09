@@ -1,0 +1,7 @@
+﻿[*.cs]
+
+# IDE0011: Add braces
+dotnet_diagnostic.IDE0011.severity = silent
+
+# Default severity for all analyzer diagnostics
+dotnet_analyzer_diagnostic.severity = silent

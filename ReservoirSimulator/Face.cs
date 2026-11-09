@@ -4,7 +4,7 @@ namespace ReservoirSimulator
 {
     public class Face
     {
-        public int ActiveGridIndex { get; set; }
+        public int GlobalGridIndex { get; set; }
         public List<int> GridIndices { get; set; } = [];
         public List<double> Transmissibility { get; set; } = [];
         public double Permeability { get; set; }
